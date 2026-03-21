@@ -1,0 +1,35 @@
+[build-system]
+requires = ["maturin>=1.8,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "oxydemark"
+version = "0.1.0"
+description = "Extensible Markdown pipelines powered by Rust"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "Axel H.", email = "noirbizarre@users.noreply.github.com" },
+]
+keywords = ["markdown", "pipeline", "extensible", "rust"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+
+[project.urls]
+Homepage = "https://github.com/noirbizarre/oxydemark"
+Repository = "https://github.com/noirbizarre/oxydemark"
+Issues = "https://github.com/noirbizarre/oxydemark/issues"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "oxydemark._core"

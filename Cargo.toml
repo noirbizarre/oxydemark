@@ -1,0 +1,17 @@
+[package]
+name = "oxydemark"
+version = "0.1.0"
+edition = "2024"
+description = "Extensible Markdown pipelines powered by Rust"
+license = "MIT"
+repository = "https://github.com/noirbizarre/oxydemark"
+readme = "README.md"
+keywords = ["markdown", "pipeline", "ast", "pyo3"]
+categories = ["text-processing", "parser-implementations"]
+
+[lib]
+name = "oxydemark"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.28", features = ["extension-module"] }

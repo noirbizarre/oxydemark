@@ -1,0 +1,41 @@
+exclude = { glob = ["target/**", "dist/**", "*.egg-info/**"] }
+
+# Built-in fast hooks (no network, no setup)
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "check-toml" },
+    { id = "check-yaml" },
+    { id = "check-merge-conflict" },
+    { id = "check-added-large-files", args = ["--maxkb=500"] },
+]
+
+# Conventional commit message validation
+[[repos]]
+repo = "https://github.com/compilerla/conventional-pre-commit"
+rev = "v4.0.0"
+hooks = [
+    { id = "conventional-pre-commit", stages = ["commit-msg"] },
+]
+
+# Local project hooks
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "cargo-fmt"
+name = "cargo fmt"
+language = "system"
+entry = "cargo fmt -- --check"
+files = '\\.rs$'
+pass_filenames = false
+
+[[repos.hooks]]
+id = "cargo-clippy"
+name = "cargo clippy"
+language = "system"
+entry = "cargo clippy -- -D warnings"
+files = '\\.rs$'
+pass_filenames = false

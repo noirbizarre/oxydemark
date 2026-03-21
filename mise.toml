@@ -1,0 +1,48 @@
+[tools]
+rust = "stable"
+python = "3.12"
+prek = "latest"
+cargo-binstall = "latest"
+git-cliff = "latest"
+"cargo:cargo-nextest" = "latest"
+"cargo:cargo-llvm-cov" = "latest"
+
+[tasks.build]
+description = "Build the Rust crate"
+run = "cargo build"
+
+[tasks.test]
+description = "Run the test suite with nextest"
+run = "cargo nextest run"
+
+[tasks.lint]
+description = "Run clippy lints"
+run = "cargo clippy -- -D warnings"
+
+[tasks.fmt]
+description = "Format Rust source code"
+run = "cargo fmt"
+
+[tasks."fmt:check"]
+description = "Check Rust formatting without modifying files"
+run = "cargo fmt -- --check"
+
+[tasks.changelog]
+description = "Generate the full CHANGELOG.md"
+run = "git cliff --output CHANGELOG.md"
+
+[tasks."changelog:preview"]
+description = "Preview unreleased changelog entries"
+run = "git cliff --unreleased"
+
+[tasks.ci]
+description = "Run all CI checks locally"
+depends = ["fmt:check", "lint", "test"]
+
+[tasks.setup]
+description = "Set up the development environment"
+run = "prek install"
+
+[tasks.coverage]
+description = "Generate code coverage report"
+run = "cargo llvm-cov"
