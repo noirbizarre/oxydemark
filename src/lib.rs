@@ -1,14 +1,24 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::Write;
+use std::fmt::{self, Write};
 
 use pyo3::prelude::*;
 use rushdown::as_kind_data;
-use rushdown::ast::{self, KindData, NodeRef, TextQualifier};
-use rushdown::parser::{self, Parser, ParserExtension};
-use rushdown::renderer::html;
-use rushdown::text;
+use rushdown::ast::{
+    self, Arena, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, TextQualifier, WalkStatus,
+    pp_indent,
+};
+use rushdown::parser::{
+    self, BlockParser, Context, InlineParser, NoParserOptions, Parser, ParserExtension, State,
+};
+use rushdown::renderer::html::{self, RendererExtension as _};
+use rushdown::renderer::{
+    self as renderer, BoxRenderNode, NoRendererOptions, NodeRenderer, NodeRendererRegistry,
+    RenderNode, TextWrite,
+};
+use rushdown::text::{self, Reader};
 use rushdown_emoji::{
-    EmojiHtmlRendererOptions, EmojiParserOptions, emoji_html_renderer_extension,
+    Emoji, EmojiHtmlRendererOptions, EmojiParserOptions, emoji_html_renderer_extension,
     emoji_parser_extension,
 };
 use rushdown_meta::{MetaParserOptions, meta_parser_extension};
@@ -116,16 +126,60 @@ impl AstNode {
 fn build_parser() -> Parser {
     let parser_extensions = parser::gfm(parser::GfmOptions::default())
         .and(meta_parser_extension(MetaParserOptions::default()))
-        .and(emoji_parser_extension(EmojiParserOptions::default()));
-    Parser::with_extensions(parser::Options::default(), parser_extensions)
+        .and(emoji_parser_extension(EmojiParserOptions::default()))
+        .and(block_component_parser_extension())
+        .and(inline_component_parser_extension())
+        .and(span_attribute_parser_extension());
+    let options = parser::Options {
+        attributes: true,
+        ..parser::Options::default()
+    };
+    Parser::with_extensions(options, parser_extensions)
 }
 
 /// Build the configured rushdown HTML renderer with all extensions.
 fn build_renderer() -> html::Renderer<'static, String> {
     html::Renderer::with_extensions(
         html::Options::default(),
-        emoji_html_renderer_extension(EmojiHtmlRendererOptions::default()),
+        emoji_html_renderer_extension(EmojiHtmlRendererOptions::default())
+            .and(block_component_html_renderer_extension())
+            .and(inline_component_html_renderer_extension())
+            .and(span_attribute_html_renderer_extension()),
     )
+}
+
+// ---------------------------------------------------------------------------
+// Cached parser / renderer (thread-local singletons)
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    /// Lazily-constructed, thread-local parser instance.
+    ///
+    /// `Parser::parse` takes `&self`, so we only need a shared borrow.
+    /// The `RefCell` exists only to satisfy `thread_local!`'s requirement
+    /// for a `'static` initializer while still allowing the closure-based
+    /// access pattern.
+    static CACHED_PARSER: RefCell<Parser> = RefCell::new(build_parser());
+
+    /// Lazily-constructed, thread-local renderer instance.
+    static CACHED_RENDERER: RefCell<html::Renderer<'static, String>> =
+        RefCell::new(build_renderer());
+}
+
+/// Execute `f` with a reference to the cached, thread-local parser.
+///
+/// Avoids reconstructing `Parser` (and all its extensions) on every call
+/// to `parse()` / `markdown_to_html()`.
+fn with_parser<R>(f: impl FnOnce(&Parser) -> R) -> R {
+    CACHED_PARSER.with(|p| f(&p.borrow()))
+}
+
+/// Execute `f` with a reference to the cached, thread-local renderer.
+///
+/// Avoids reconstructing `Renderer` (and all its extensions) on every call
+/// to `markdown_to_html()`.
+fn with_renderer<R>(f: impl FnOnce(&html::Renderer<'static, String>) -> R) -> R {
+    CACHED_RENDERER.with(|r| f(&r.borrow()))
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +189,7 @@ fn build_renderer() -> html::Renderer<'static, String> {
 /// Map a rushdown `KindData` variant to a human-readable kind string.
 ///
 /// Emphasis level 1 maps to "emphasis", level 2 maps to "strong".
+/// Extension nodes (emoji, components) are detected via downcast.
 fn kind_name(node: &ast::Node) -> &'static str {
     match node.kind_data() {
         KindData::Document(_) => "document",
@@ -165,6 +220,31 @@ fn kind_name(node: &ast::Node) -> &'static str {
         KindData::TableRow(_) => "table_row",
         KindData::TableCell(_) => "table_cell",
         KindData::Strikethrough(_) => "strikethrough",
+        KindData::Extension(ext) => {
+            if (ext.as_ref() as &dyn std::any::Any)
+                .downcast_ref::<Emoji>()
+                .is_some()
+            {
+                "emoji"
+            } else if (ext.as_ref() as &dyn std::any::Any)
+                .downcast_ref::<BlockComponent>()
+                .is_some()
+            {
+                "block_component"
+            } else if (ext.as_ref() as &dyn std::any::Any)
+                .downcast_ref::<InlineComponent>()
+                .is_some()
+            {
+                "inline_component"
+            } else if (ext.as_ref() as &dyn std::any::Any)
+                .downcast_ref::<SpanAttributes>()
+                .is_some()
+            {
+                "span"
+            } else {
+                "unknown"
+            }
+        }
         _ => "unknown",
     }
 }
@@ -175,10 +255,14 @@ fn kind_name(node: &ast::Node) -> &'static str {
 /// `CodeSpan` content is stored in child `Text` nodes, so we return `None`
 /// here and let child traversal handle it.
 /// `RawHtml` uses `str(source)` which returns a `Cow<str>`.
+/// `Emoji` extension nodes produce their Unicode character.
 fn node_text(node: &ast::Node, source: &str) -> Option<String> {
     match node.kind_data() {
         KindData::Text(t) => Some(t.str(source).to_string()),
         KindData::RawHtml(h) => Some(h.str(source).to_string()),
+        KindData::Extension(ext) => (ext.as_ref() as &dyn std::any::Any)
+            .downcast_ref::<Emoji>()
+            .map(|emoji| emoji.as_str().to_string()),
         _ => None,
     }
 }
@@ -202,6 +286,9 @@ fn is_hardbreak(node: &ast::Node) -> bool {
 }
 
 /// Extract attributes (e.g. href, src, title) from link/image nodes.
+///
+/// For component extension nodes, extract the component name as "name".
+/// For emoji nodes, extract the shortcode as "shortcode".
 fn node_attributes(node: &ast::Node, source: &str) -> HashMap<String, String> {
     let mut attrs = HashMap::new();
 
@@ -223,6 +310,21 @@ fn node_attributes(node: &ast::Node, source: &str) -> HashMap<String, String> {
         }
         KindData::Heading(h) => {
             attrs.insert("level".to_string(), h.level().to_string());
+        }
+        KindData::Extension(ext) => {
+            if let Some(emoji) = (ext.as_ref() as &dyn std::any::Any).downcast_ref::<Emoji>() {
+                if let Some(sc) = emoji.shortcode() {
+                    attrs.insert("shortcode".to_string(), sc.to_string());
+                }
+            } else if let Some(bc) =
+                (ext.as_ref() as &dyn std::any::Any).downcast_ref::<BlockComponent>()
+            {
+                attrs.insert("name".to_string(), bc.name.clone());
+            } else if let Some(ic) =
+                (ext.as_ref() as &dyn std::any::Any).downcast_ref::<InlineComponent>()
+            {
+                attrs.insert("name".to_string(), ic.name.clone());
+            }
         }
         _ => {}
     }
@@ -455,6 +557,36 @@ fn render_node(w: &mut String, node: &AstNode) {
             render_children(w, node);
             w.push_str("</td>");
         }
+        "emoji" => {
+            // Render emoji as its Unicode text.
+            if let Some(ref t) = node.text {
+                w.push_str(t);
+            }
+        }
+        "block_component" => {
+            // Passthrough: render as a bare <div> with attributes.
+            w.push_str("<div");
+            render_html_attributes(w, node, &["name"]);
+            w.push_str(">\n");
+            render_children(w, node);
+            w.push_str("</div>\n");
+        }
+        "inline_component" => {
+            // Passthrough: render as a bare <span> with attributes.
+            w.push_str("<span");
+            render_html_attributes(w, node, &["name"]);
+            w.push('>');
+            render_children(w, node);
+            w.push_str("</span>");
+        }
+        "span" => {
+            // Span attributes: render as <span> with attributes.
+            w.push_str("<span");
+            render_html_attributes(w, node, &[]);
+            w.push('>');
+            render_children(w, node);
+            w.push_str("</span>");
+        }
         _ => {
             // Unknown node types: render children transparently.
             render_children(w, node);
@@ -504,6 +636,737 @@ fn html_escape_attr(s: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Comark extension types (Phase 2)
+// ---------------------------------------------------------------------------
+
+/// A block component node: `::name{attrs}\ncontent\n::`.
+///
+/// Represents a container block introduced by `::component_name{attributes}`.
+/// The component body runs until a closing `::` line. All component semantics
+/// (name, attributes) are carried in the AST for Python plugins to consume.
+#[derive(Debug)]
+struct BlockComponent {
+    name: String,
+}
+
+impl NodeKind for BlockComponent {
+    fn typ(&self) -> NodeType {
+        NodeType::ContainerBlock
+    }
+
+    fn kind_name(&self) -> &'static str {
+        "BlockComponent"
+    }
+}
+
+impl PrettyPrint for BlockComponent {
+    fn pretty_print(&self, w: &mut dyn fmt::Write, _source: &str, level: usize) -> fmt::Result {
+        writeln!(w, "{}name: {}", pp_indent(level), self.name)
+    }
+}
+
+impl From<BlockComponent> for KindData {
+    fn from(e: BlockComponent) -> Self {
+        KindData::Extension(Box::new(e))
+    }
+}
+
+/// An inline component node: `:name[content]{attrs}`.
+///
+/// Represents an inline element introduced by `:component_name[label]{attrs}`.
+/// The label content is parsed as inline Markdown children.
+#[derive(Debug)]
+struct InlineComponent {
+    name: String,
+}
+
+impl NodeKind for InlineComponent {
+    fn typ(&self) -> NodeType {
+        NodeType::Inline
+    }
+
+    fn kind_name(&self) -> &'static str {
+        "InlineComponent"
+    }
+}
+
+impl PrettyPrint for InlineComponent {
+    fn pretty_print(&self, w: &mut dyn fmt::Write, _source: &str, level: usize) -> fmt::Result {
+        writeln!(w, "{}name: {}", pp_indent(level), self.name)
+    }
+}
+
+impl From<InlineComponent> for KindData {
+    fn from(e: InlineComponent) -> Self {
+        KindData::Extension(Box::new(e))
+    }
+}
+
+/// A span attribute node: `[text]{.class #id key="val"}`.
+///
+/// Wraps inline content with HTML attributes. This is a pure wrapper node
+/// whose rendering semantics depend on its attributes.
+#[derive(Debug)]
+struct SpanAttributes;
+
+impl NodeKind for SpanAttributes {
+    fn typ(&self) -> NodeType {
+        NodeType::Inline
+    }
+
+    fn kind_name(&self) -> &'static str {
+        "SpanAttributes"
+    }
+}
+
+impl PrettyPrint for SpanAttributes {
+    fn pretty_print(&self, _w: &mut dyn fmt::Write, _source: &str, _level: usize) -> fmt::Result {
+        Ok(())
+    }
+}
+
+impl From<SpanAttributes> for KindData {
+    fn from(e: SpanAttributes) -> Self {
+        KindData::Extension(Box::new(e))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Block component parser
+// ---------------------------------------------------------------------------
+
+/// Parses block components: `::name{attrs}\ncontent\n::`.
+#[derive(Debug)]
+struct BlockComponentParser;
+
+impl BlockParser for BlockComponentParser {
+    fn trigger(&self) -> &[u8] {
+        b":"
+    }
+
+    fn open(
+        &self,
+        arena: &mut Arena,
+        _parent_ref: NodeRef,
+        reader: &mut text::BasicReader,
+        _ctx: &mut Context,
+    ) -> Option<(NodeRef, State)> {
+        let (line_bytes, _seg) = reader.peek_line_bytes()?;
+        let line = std::str::from_utf8(&line_bytes).ok()?;
+        let trimmed = line.trim();
+
+        // Must start with :: but NOT ::: (Phase 3 nesting).
+        if !trimmed.starts_with("::") || trimmed.starts_with(":::") {
+            return None;
+        }
+
+        let rest = trimmed[2..].trim();
+        if rest.is_empty() {
+            // This is a bare `::` which is a closing marker, not an opening.
+            return None;
+        }
+
+        // Parse name and optional attributes: `name{attrs}` or just `name`.
+        let (name, attr_str) = if let Some(brace_start) = rest.find('{') {
+            if !rest.ends_with('}') {
+                return None;
+            }
+            let name = rest[..brace_start].trim();
+            let attrs = &rest[brace_start + 1..rest.len() - 1];
+            (name, Some(attrs))
+        } else {
+            (rest, None)
+        };
+
+        // Name must be non-empty and alphanumeric (with hyphens/underscores).
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
+            return None;
+        }
+
+        let node_ref = arena.new_node(BlockComponent {
+            name: name.to_string(),
+        });
+
+        // Parse and attach attributes.
+        if let Some(attrs) = attr_str {
+            parse_component_attributes(attrs, &mut arena[node_ref]);
+        }
+
+        reader.advance_line();
+        Some((node_ref, State::HAS_CHILDREN))
+    }
+
+    fn cont(
+        &self,
+        _arena: &mut Arena,
+        _node_ref: NodeRef,
+        reader: &mut text::BasicReader,
+        _ctx: &mut Context,
+    ) -> Option<State> {
+        let (line_bytes, _seg) = reader.peek_line_bytes()?;
+        let line = std::str::from_utf8(&line_bytes).ok()?;
+        let trimmed = line.trim();
+
+        // Closing marker: a line that is exactly `::`.
+        if trimmed == "::" {
+            reader.advance_line();
+            return None; // Close this block.
+        }
+
+        // Continue accepting children.
+        Some(State::HAS_CHILDREN)
+    }
+
+    fn can_interrupt_paragraph(&self) -> bool {
+        true
+    }
+}
+
+/// Parser extension function for block components.
+fn block_component_parser_extension() -> impl ParserExtension {
+    parser::ParserExtensionFn::new(|parser: &mut Parser| {
+        parser.add_block_parser(
+            || Box::new(BlockComponentParser) as Box<dyn BlockParser>,
+            NoParserOptions,
+            650,
+        );
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Inline component parser
+// ---------------------------------------------------------------------------
+
+/// Parses inline components: `:name[content]{attrs}`.
+#[derive(Debug)]
+struct InlineComponentParser;
+
+impl InlineParser for InlineComponentParser {
+    fn trigger(&self) -> &[u8] {
+        b":"
+    }
+
+    fn parse(
+        &self,
+        arena: &mut Arena,
+        _parent_ref: NodeRef,
+        reader: &mut text::BlockReader,
+        _ctx: &mut Context,
+    ) -> Option<NodeRef> {
+        let start_pos = reader.position();
+
+        // We're triggered on ':'. Check it's a single colon (not :: for block).
+        if reader.peek_byte() != b':' {
+            return None;
+        }
+        reader.advance(1);
+
+        // Next char must NOT be ':' (that would be a block component `::`)
+        // and must be alphanumeric (start of component name).
+        let next = reader.peek_byte();
+        if next == b':' || next == text::EOS || !is_name_start(next) {
+            reader.set_position(start_pos.0, start_pos.1);
+            return None;
+        }
+
+        // Read the component name.
+        let name_start = reader.position();
+        while {
+            let b = reader.peek_byte();
+            b != text::EOS && is_name_char(b)
+        } {
+            reader.advance(1);
+        }
+
+        let name_end = reader.position();
+        let name = &reader.source()[name_start.1.start()..name_end.1.start()];
+        if name.is_empty() {
+            reader.set_position(start_pos.0, start_pos.1);
+            return None;
+        }
+
+        // Expect '[' for content (optional: if no '[', we still accept as an
+        // empty inline component like `:icon{name="star"}`).
+        let has_bracket = reader.peek_byte() == b'[';
+
+        let node_ref = arena.new_node(InlineComponent {
+            name: name.to_string(),
+        });
+
+        if has_bracket {
+            reader.advance(1); // skip '['
+
+            // Read content until matching ']', handling nested brackets.
+            let mut depth: usize = 1;
+            let content_start = reader.position();
+            loop {
+                let b = reader.peek_byte();
+                if b == text::EOS {
+                    // Unclosed bracket -- abort.
+                    reader.set_position(start_pos.0, start_pos.1);
+                    return None;
+                }
+                if b == b'[' {
+                    depth += 1;
+                } else if b == b']' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                reader.advance(1);
+            }
+
+            // Extract content text and create a text child node.
+            let content_end = reader.position();
+            let content = &reader.source()[content_start.1.start()..content_end.1.start()];
+            if !content.is_empty() {
+                let text_ref = arena.new_node(ast::Text::new(text::Segment::new(
+                    content_start.1.start(),
+                    content_end.1.start(),
+                )));
+                node_ref.append_child(arena, text_ref);
+            }
+
+            reader.advance(1); // skip ']'
+        }
+
+        // Optional attributes: `{attrs}`.
+        if reader.peek_byte() == b'{' {
+            reader.advance(1);
+            let attr_start = reader.position();
+            let mut brace_depth: usize = 1;
+            loop {
+                let b = reader.peek_byte();
+                if b == text::EOS {
+                    reader.set_position(start_pos.0, start_pos.1);
+                    return None;
+                }
+                if b == b'{' {
+                    brace_depth += 1;
+                } else if b == b'}' {
+                    brace_depth -= 1;
+                    if brace_depth == 0 {
+                        break;
+                    }
+                }
+                reader.advance(1);
+            }
+            let attr_end = reader.position();
+            let attr_str = &reader.source()[attr_start.1.start()..attr_end.1.start()];
+            parse_component_attributes(attr_str, &mut arena[node_ref]);
+            reader.advance(1); // skip '}'
+        } else if !has_bracket {
+            // Must have at least bracket or attributes.
+            reader.set_position(start_pos.0, start_pos.1);
+            return None;
+        }
+
+        Some(node_ref)
+    }
+}
+
+/// Parser extension function for inline components.
+fn inline_component_parser_extension() -> impl ParserExtension {
+    parser::ParserExtensionFn::new(|parser: &mut Parser| {
+        parser.add_inline_parser(
+            || Box::new(InlineComponentParser) as Box<dyn InlineParser>,
+            NoParserOptions,
+            450,
+        );
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Span attribute parser
+// ---------------------------------------------------------------------------
+
+/// Parses span attributes: `[text]{.class #id key="val"}`.
+#[derive(Debug)]
+struct SpanAttributeParser;
+
+impl InlineParser for SpanAttributeParser {
+    fn trigger(&self) -> &[u8] {
+        b"["
+    }
+
+    fn parse(
+        &self,
+        arena: &mut Arena,
+        _parent_ref: NodeRef,
+        reader: &mut text::BlockReader,
+        _ctx: &mut Context,
+    ) -> Option<NodeRef> {
+        let start_pos = reader.position();
+
+        if reader.peek_byte() != b'[' {
+            return None;
+        }
+        reader.advance(1);
+
+        // Read content until matching ']'.
+        let mut depth: usize = 1;
+        let content_start = reader.position();
+        loop {
+            let b = reader.peek_byte();
+            if b == text::EOS {
+                reader.set_position(start_pos.0, start_pos.1);
+                return None;
+            }
+            if b == b'[' {
+                depth += 1;
+            } else if b == b']' {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            reader.advance(1);
+        }
+
+        let content_end = reader.position();
+        let content = &reader.source()[content_start.1.start()..content_end.1.start()];
+        reader.advance(1); // skip ']'
+
+        // Must be immediately followed by `{`.
+        if reader.peek_byte() != b'{' {
+            reader.set_position(start_pos.0, start_pos.1);
+            return None;
+        }
+        reader.advance(1);
+
+        // Read attributes until matching '}'.
+        let attr_start = reader.position();
+        let mut brace_depth: usize = 1;
+        loop {
+            let b = reader.peek_byte();
+            if b == text::EOS {
+                reader.set_position(start_pos.0, start_pos.1);
+                return None;
+            }
+            if b == b'{' {
+                brace_depth += 1;
+            } else if b == b'}' {
+                brace_depth -= 1;
+                if brace_depth == 0 {
+                    break;
+                }
+            }
+            reader.advance(1);
+        }
+
+        let attr_end = reader.position();
+        let attr_str = &reader.source()[attr_start.1.start()..attr_end.1.start()];
+
+        // Attributes must be non-empty for span syntax.
+        if attr_str.trim().is_empty() {
+            reader.set_position(start_pos.0, start_pos.1);
+            return None;
+        }
+
+        let node_ref = arena.new_node(SpanAttributes);
+
+        // Create a text child node for the content.
+        if !content.is_empty() {
+            let text_ref = arena.new_node(ast::Text::new(text::Segment::new(
+                content_start.1.start(),
+                content_end.1.start(),
+            )));
+            node_ref.append_child(arena, text_ref);
+        }
+
+        // Parse and attach attributes.
+        parse_component_attributes(attr_str, &mut arena[node_ref]);
+
+        reader.advance(1); // skip '}'
+
+        Some(node_ref)
+    }
+}
+
+/// Parser extension function for span attributes.
+fn span_attribute_parser_extension() -> impl ParserExtension {
+    parser::ParserExtensionFn::new(|parser: &mut Parser| {
+        parser.add_inline_parser(
+            || Box::new(SpanAttributeParser) as Box<dyn InlineParser>,
+            NoParserOptions,
+            150,
+        );
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Shared attribute parsing helper
+// ---------------------------------------------------------------------------
+
+/// Parse a comark-style attribute string and attach key/value pairs to a node.
+///
+/// Supports: `.class`, `#id`, `key="value"`, `key='value'`, `key=value`.
+/// Multiple `.class` entries are merged into a single `class` attribute,
+/// space-separated.
+fn parse_component_attributes(attr_str: &str, node: &mut ast::Node) {
+    let mut classes = Vec::new();
+    let input = attr_str.trim();
+    let bytes = input.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        // Skip whitespace.
+        if bytes[i].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+
+        if bytes[i] == b'.' {
+            // Class shorthand: .classname
+            i += 1;
+            let start = i;
+            while i < bytes.len()
+                && !bytes[i].is_ascii_whitespace()
+                && bytes[i] != b'.'
+                && bytes[i] != b'#'
+                && bytes[i] != b'}'
+            {
+                i += 1;
+            }
+            if i > start {
+                classes.push(input[start..i].to_string());
+            }
+        } else if bytes[i] == b'#' {
+            // ID shorthand: #identifier
+            i += 1;
+            let start = i;
+            while i < bytes.len()
+                && !bytes[i].is_ascii_whitespace()
+                && bytes[i] != b'.'
+                && bytes[i] != b'#'
+                && bytes[i] != b'}'
+            {
+                i += 1;
+            }
+            if i > start {
+                node.attributes_mut()
+                    .insert("id", text::Value::from(input[start..i].to_string()));
+            }
+        } else {
+            // Key=value pair.
+            let key_start = i;
+            while i < bytes.len()
+                && bytes[i] != b'='
+                && !bytes[i].is_ascii_whitespace()
+                && bytes[i] != b'}'
+            {
+                i += 1;
+            }
+            let key = &input[key_start..i];
+            if key.is_empty() {
+                i += 1;
+                continue;
+            }
+
+            if i < bytes.len() && bytes[i] == b'=' {
+                i += 1; // skip '='
+                let value = if i < bytes.len() && (bytes[i] == b'"' || bytes[i] == b'\'') {
+                    let quote = bytes[i];
+                    i += 1;
+                    let val_start = i;
+                    while i < bytes.len() && bytes[i] != quote {
+                        i += 1;
+                    }
+                    let val = &input[val_start..i];
+                    if i < bytes.len() {
+                        i += 1; // skip closing quote
+                    }
+                    val
+                } else {
+                    let val_start = i;
+                    while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b'}' {
+                        i += 1;
+                    }
+                    &input[val_start..i]
+                };
+                node.attributes_mut()
+                    .insert(key, text::Value::from(value.to_string()));
+            } else {
+                // Boolean attribute (key with no value).
+                node.attributes_mut()
+                    .insert(key, text::Value::from(String::new()));
+            }
+        }
+    }
+
+    if !classes.is_empty() {
+        node.attributes_mut()
+            .insert("class", text::Value::from(classes.join(" ")));
+    }
+}
+
+/// Check if a byte is valid as the start of a component name.
+fn is_name_start(b: u8) -> bool {
+    b.is_ascii_alphabetic() || b == b'_'
+}
+
+/// Check if a byte is valid as part of a component name.
+fn is_name_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
+}
+
+// ---------------------------------------------------------------------------
+// HTML renderers for Comark extensions (rushdown fast path)
+// ---------------------------------------------------------------------------
+
+/// Renders block components as bare `<div>` elements.
+#[derive(Debug)]
+struct BlockComponentHtmlRenderer;
+
+impl<W: TextWrite> RenderNode<W> for BlockComponentHtmlRenderer {
+    fn render_node<'a>(
+        &self,
+        writer: &mut W,
+        source: &'a str,
+        arena: &'a Arena,
+        node_ref: NodeRef,
+        entering: bool,
+        _context: &mut renderer::Context,
+    ) -> rushdown::Result<WalkStatus> {
+        let node = &arena[node_ref];
+        if entering {
+            writer.write_str("<div")?;
+            for (key, value) in node.attributes().iter() {
+                writer.write_str(" ")?;
+                writer.write_str(key)?;
+                writer.write_str("=\"")?;
+                let val = value.str(source);
+                writer.write_str(&html_escape(val))?;
+                writer.write_str("\"")?;
+            }
+            writer.write_str(">\n")?;
+        } else {
+            writer.write_str("</div>\n")?;
+        }
+        Ok(WalkStatus::Continue)
+    }
+}
+
+impl<'r, W: TextWrite> NodeRenderer<'r, W> for BlockComponentHtmlRenderer {
+    fn register_node_renderer_fn(self, nrr: &mut impl NodeRendererRegistry<'r, W>) {
+        nrr.register_node_renderer_fn(
+            std::any::TypeId::of::<BlockComponent>(),
+            BoxRenderNode::new(self),
+        );
+    }
+}
+
+/// Extension function to register the block component HTML renderer.
+fn block_component_html_renderer_extension() -> impl html::RendererExtension<'static, String> {
+    html::RendererExtensionFn::new(|renderer: &mut html::Renderer<'_, String>| {
+        renderer.add_node_renderer(|| BlockComponentHtmlRenderer, NoRendererOptions);
+    })
+}
+
+/// Renders inline components as bare `<span>` elements.
+#[derive(Debug)]
+struct InlineComponentHtmlRenderer;
+
+impl<W: TextWrite> RenderNode<W> for InlineComponentHtmlRenderer {
+    fn render_node<'a>(
+        &self,
+        writer: &mut W,
+        source: &'a str,
+        arena: &'a Arena,
+        node_ref: NodeRef,
+        entering: bool,
+        _context: &mut renderer::Context,
+    ) -> rushdown::Result<WalkStatus> {
+        let node = &arena[node_ref];
+        if entering {
+            writer.write_str("<span")?;
+            for (key, value) in node.attributes().iter() {
+                writer.write_str(" ")?;
+                writer.write_str(key)?;
+                writer.write_str("=\"")?;
+                let val = value.str(source);
+                writer.write_str(&html_escape(val))?;
+                writer.write_str("\"")?;
+            }
+            writer.write_str(">")?;
+        } else {
+            writer.write_str("</span>")?;
+        }
+        Ok(WalkStatus::Continue)
+    }
+}
+
+impl<'r, W: TextWrite> NodeRenderer<'r, W> for InlineComponentHtmlRenderer {
+    fn register_node_renderer_fn(self, nrr: &mut impl NodeRendererRegistry<'r, W>) {
+        nrr.register_node_renderer_fn(
+            std::any::TypeId::of::<InlineComponent>(),
+            BoxRenderNode::new(self),
+        );
+    }
+}
+
+/// Extension function to register the inline component HTML renderer.
+fn inline_component_html_renderer_extension() -> impl html::RendererExtension<'static, String> {
+    html::RendererExtensionFn::new(|renderer: &mut html::Renderer<'_, String>| {
+        renderer.add_node_renderer(|| InlineComponentHtmlRenderer, NoRendererOptions);
+    })
+}
+
+/// Renders span attribute nodes as `<span>` elements.
+#[derive(Debug)]
+struct SpanAttributeHtmlRenderer;
+
+impl<W: TextWrite> RenderNode<W> for SpanAttributeHtmlRenderer {
+    fn render_node<'a>(
+        &self,
+        writer: &mut W,
+        source: &'a str,
+        arena: &'a Arena,
+        node_ref: NodeRef,
+        entering: bool,
+        _context: &mut renderer::Context,
+    ) -> rushdown::Result<WalkStatus> {
+        let node = &arena[node_ref];
+        if entering {
+            writer.write_str("<span")?;
+            for (key, value) in node.attributes().iter() {
+                writer.write_str(" ")?;
+                writer.write_str(key)?;
+                writer.write_str("=\"")?;
+                let val = value.str(source);
+                writer.write_str(&html_escape(val))?;
+                writer.write_str("\"")?;
+            }
+            writer.write_str(">")?;
+        } else {
+            writer.write_str("</span>")?;
+        }
+        Ok(WalkStatus::Continue)
+    }
+}
+
+impl<'r, W: TextWrite> NodeRenderer<'r, W> for SpanAttributeHtmlRenderer {
+    fn register_node_renderer_fn(self, nrr: &mut impl NodeRendererRegistry<'r, W>) {
+        nrr.register_node_renderer_fn(
+            std::any::TypeId::of::<SpanAttributes>(),
+            BoxRenderNode::new(self),
+        );
+    }
+}
+
+/// Extension function to register the span attribute HTML renderer.
+fn span_attribute_html_renderer_extension() -> impl html::RendererExtension<'static, String> {
+    html::RendererExtensionFn::new(|renderer: &mut html::Renderer<'_, String>| {
+        renderer.add_node_renderer(|| SpanAttributeHtmlRenderer, NoRendererOptions);
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Public Python API
 // ---------------------------------------------------------------------------
 
@@ -513,10 +1376,11 @@ fn html_escape_attr(s: &str) -> String {
 /// Returns an `AstNode` tree that can be inspected and modified from Python.
 #[pyfunction]
 fn parse(markdown: &str) -> PyResult<AstNode> {
-    let parser = build_parser();
-    let mut reader = text::BasicReader::new(markdown);
-    let (arena, document_ref) = parser.parse(&mut reader);
-    Ok(arena_to_ast_node(&arena, document_ref, markdown))
+    with_parser(|parser| {
+        let mut reader = text::BasicReader::new(markdown);
+        let (arena, document_ref) = parser.parse(&mut reader);
+        Ok(arena_to_ast_node(&arena, document_ref, markdown))
+    })
 }
 
 /// Render an `AstNode` tree to an HTML string.
@@ -535,16 +1399,18 @@ fn render_ast(node: &AstNode) -> String {
 /// no AST-level plugin transformations are needed.
 #[pyfunction]
 fn markdown_to_html(markdown: &str) -> PyResult<String> {
-    let parser = build_parser();
-    let renderer = build_renderer();
-    let mut reader = text::BasicReader::new(markdown);
-    let (arena, document_ref) = parser.parse(&mut reader);
+    with_parser(|parser| {
+        let mut reader = text::BasicReader::new(markdown);
+        let (arena, document_ref) = parser.parse(&mut reader);
 
-    let mut output = String::new();
-    renderer
-        .render(&mut output, markdown, &arena, document_ref)
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{e}")))?;
-    Ok(output)
+        with_renderer(|renderer| {
+            let mut output = String::new();
+            renderer
+                .render(&mut output, markdown, &arena, document_ref)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{e}")))?;
+            Ok(output)
+        })
+    })
 }
 
 /// Render Markdown input to HTML (legacy API, kept for backward compatibility).
@@ -1106,5 +1972,381 @@ mod tests {
         let html1 = render(input).unwrap();
         let html2 = markdown_to_html(input).unwrap();
         assert_eq!(html1, html2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Comark: emoji AST
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_emoji_node_kind() {
+        let ast = parse("Hello :wave:").unwrap();
+        let nodes = ast.walk();
+        let emoji_nodes: Vec<&AstNode> = nodes.iter().filter(|n| n.kind == "emoji").collect();
+        assert!(
+            !emoji_nodes.is_empty(),
+            "Expected at least one emoji node, got kinds: {:?}",
+            nodes.iter().map(|n| &n.kind).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn parse_emoji_has_shortcode_attribute() {
+        let ast = parse(":wave:").unwrap();
+        let nodes = ast.walk();
+        let emoji = nodes.iter().find(|n| n.kind == "emoji").unwrap();
+        assert_eq!(
+            emoji.attributes.get("shortcode").map(|v| v.as_str()),
+            Some("wave")
+        );
+    }
+
+    #[test]
+    fn parse_emoji_has_text_content() {
+        let ast = parse(":wave:").unwrap();
+        let nodes = ast.walk();
+        let emoji = nodes.iter().find(|n| n.kind == "emoji").unwrap();
+        assert!(
+            emoji.text.is_some(),
+            "Emoji node should have text (Unicode char)"
+        );
+        // The wave emoji is 👋 (U+1F44B).
+        assert_eq!(emoji.text.as_deref(), Some("👋"));
+    }
+
+    #[test]
+    fn render_emoji_fast_path() {
+        let html = markdown_to_html(":wave:").unwrap();
+        assert!(
+            html.contains("👋"),
+            "Expected wave emoji in HTML, got: {html}"
+        );
+    }
+
+    #[test]
+    fn render_emoji_ast_round_trip() {
+        let ast = parse(":wave:").unwrap();
+        let html = render_ast_to_html(&ast);
+        assert!(
+            html.contains("👋"),
+            "Expected wave emoji in round-trip HTML, got: {html}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Comark: block components
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_block_component() {
+        let input = "::note\nSome content\n::";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        let bc = nodes
+            .iter()
+            .find(|n| n.kind == "block_component")
+            .expect("Expected a block_component node");
+        assert_eq!(bc.attributes.get("name").map(|v| v.as_str()), Some("note"));
+    }
+
+    #[test]
+    fn parse_block_component_with_attributes() {
+        let input = "::warning{.alert #important}\nBe careful\n::";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        let bc = nodes
+            .iter()
+            .find(|n| n.kind == "block_component")
+            .expect("Expected a block_component node");
+        assert_eq!(
+            bc.attributes.get("name").map(|v| v.as_str()),
+            Some("warning")
+        );
+        assert_eq!(
+            bc.attributes.get("class").map(|v| v.as_str()),
+            Some("alert")
+        );
+        assert_eq!(
+            bc.attributes.get("id").map(|v| v.as_str()),
+            Some("important")
+        );
+    }
+
+    #[test]
+    fn parse_block_component_with_key_value() {
+        let input = "::note{type=\"info\"}\nContent\n::";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        let bc = nodes
+            .iter()
+            .find(|n| n.kind == "block_component")
+            .expect("Expected a block_component node");
+        assert_eq!(bc.attributes.get("type").map(|v| v.as_str()), Some("info"));
+    }
+
+    #[test]
+    fn parse_block_component_has_children() {
+        let input = "::note\nHello world\n::";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        let bc = nodes
+            .iter()
+            .find(|n| n.kind == "block_component")
+            .expect("Expected a block_component node");
+        assert!(
+            !bc.children.is_empty(),
+            "Block component should have children"
+        );
+    }
+
+    #[test]
+    fn render_block_component_fast_path() {
+        let input = "::note\nContent\n::";
+        let html = markdown_to_html(input).unwrap();
+        assert!(
+            html.contains("<div"),
+            "Block component should render as <div>, got: {html}"
+        );
+        assert!(
+            html.contains("</div>"),
+            "Block component should have closing </div>, got: {html}"
+        );
+    }
+
+    #[test]
+    fn render_block_component_with_attrs_fast_path() {
+        let input = "::note{.info}\nContent\n::";
+        let html = markdown_to_html(input).unwrap();
+        assert!(
+            html.contains("class=\"info\""),
+            "Expected class attribute in HTML, got: {html}"
+        );
+    }
+
+    #[test]
+    fn render_block_component_ast_round_trip() {
+        let input = "::note\nContent\n::";
+        let ast = parse(input).unwrap();
+        let html = render_ast_to_html(&ast);
+        assert!(
+            html.contains("<div"),
+            "Block component round-trip should produce <div>, got: {html}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Comark: inline components
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_inline_component_with_content() {
+        let input = ":icon[star]";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        let ic = nodes
+            .iter()
+            .find(|n| n.kind == "inline_component")
+            .expect("Expected an inline_component node");
+        assert_eq!(ic.attributes.get("name").map(|v| v.as_str()), Some("icon"));
+    }
+
+    #[test]
+    fn parse_inline_component_with_attrs() {
+        let input = ":badge[Pro]{.premium}";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        let ic = nodes
+            .iter()
+            .find(|n| n.kind == "inline_component")
+            .expect("Expected an inline_component node");
+        assert_eq!(ic.attributes.get("name").map(|v| v.as_str()), Some("badge"));
+        assert_eq!(
+            ic.attributes.get("class").map(|v| v.as_str()),
+            Some("premium")
+        );
+    }
+
+    #[test]
+    fn parse_inline_component_attrs_only() {
+        let input = ":icon{type=\"star\"}";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        let ic = nodes
+            .iter()
+            .find(|n| n.kind == "inline_component")
+            .expect("Expected an inline_component node");
+        assert_eq!(ic.attributes.get("name").map(|v| v.as_str()), Some("icon"));
+        assert_eq!(ic.attributes.get("type").map(|v| v.as_str()), Some("star"));
+    }
+
+    #[test]
+    fn render_inline_component_fast_path() {
+        let input = ":badge[Pro]{.premium}";
+        let html = markdown_to_html(input).unwrap();
+        assert!(
+            html.contains("<span"),
+            "Inline component should render as <span>, got: {html}"
+        );
+    }
+
+    #[test]
+    fn render_inline_component_ast_round_trip() {
+        let input = ":badge[Pro]";
+        let ast = parse(input).unwrap();
+        let html = render_ast_to_html(&ast);
+        assert!(
+            html.contains("<span"),
+            "Inline component round-trip should produce <span>, got: {html}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Comark: span attributes
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_span_attributes() {
+        let input = "[important]{.highlight}";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        let span = nodes
+            .iter()
+            .find(|n| n.kind == "span")
+            .expect("Expected a span node");
+        assert_eq!(
+            span.attributes.get("class").map(|v| v.as_str()),
+            Some("highlight")
+        );
+    }
+
+    #[test]
+    fn parse_span_with_id() {
+        let input = "[text]{#myid}";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        let span = nodes
+            .iter()
+            .find(|n| n.kind == "span")
+            .expect("Expected a span node");
+        assert_eq!(span.attributes.get("id").map(|v| v.as_str()), Some("myid"));
+    }
+
+    #[test]
+    fn parse_span_with_multiple_classes() {
+        let input = "[text]{.a .b .c}";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        let span = nodes
+            .iter()
+            .find(|n| n.kind == "span")
+            .expect("Expected a span node");
+        let class = span.attributes.get("class").map(|v| v.as_str()).unwrap();
+        assert!(class.contains("a"), "Expected class 'a' in: {class}");
+        assert!(class.contains("b"), "Expected class 'b' in: {class}");
+        assert!(class.contains("c"), "Expected class 'c' in: {class}");
+    }
+
+    #[test]
+    fn render_span_fast_path() {
+        let input = "[highlighted]{.mark}";
+        let html = markdown_to_html(input).unwrap();
+        assert!(
+            html.contains("<span"),
+            "Span should render as <span>, got: {html}"
+        );
+        assert!(
+            html.contains("class=\"mark\""),
+            "Span should have class attribute, got: {html}"
+        );
+    }
+
+    #[test]
+    fn render_span_ast_round_trip() {
+        let input = "[highlighted]{.mark}";
+        let ast = parse(input).unwrap();
+        let html = render_ast_to_html(&ast);
+        assert!(
+            html.contains("<span"),
+            "Span round-trip should produce <span>, got: {html}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Comark: attribute parsing helper
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_component_attributes_class() {
+        with_parser(|parser| {
+            let mut reader = text::BasicReader::new("test");
+            let (mut arena, _) = parser.parse(&mut reader);
+            let node_ref = arena.new_node(SpanAttributes);
+            parse_component_attributes(".foo .bar", &mut arena[node_ref]);
+            let class_val = arena[node_ref]
+                .attributes()
+                .get("class")
+                .unwrap()
+                .str("test")
+                .to_string();
+            assert_eq!(class_val, "foo bar");
+        });
+    }
+
+    #[test]
+    fn parse_component_attributes_id() {
+        with_parser(|parser| {
+            let mut reader = text::BasicReader::new("test");
+            let (mut arena, _) = parser.parse(&mut reader);
+            let node_ref = arena.new_node(SpanAttributes);
+            parse_component_attributes("#myid", &mut arena[node_ref]);
+            let id_val = arena[node_ref]
+                .attributes()
+                .get("id")
+                .unwrap()
+                .str("test")
+                .to_string();
+            assert_eq!(id_val, "myid");
+        });
+    }
+
+    #[test]
+    fn parse_component_attributes_key_value() {
+        with_parser(|parser| {
+            let mut reader = text::BasicReader::new("test");
+            let (mut arena, _) = parser.parse(&mut reader);
+            let node_ref = arena.new_node(SpanAttributes);
+            parse_component_attributes("data-x=\"hello\"", &mut arena[node_ref]);
+            let val = arena[node_ref]
+                .attributes()
+                .get("data-x")
+                .unwrap()
+                .str("test")
+                .to_string();
+            assert_eq!(val, "hello");
+        });
+    }
+
+    #[test]
+    fn block_component_not_triple_colon() {
+        // ::: should not match the block component parser (reserved for Phase 3).
+        let input = ":::note\nContent\n:::";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        assert!(
+            nodes.iter().all(|n| n.kind != "block_component"),
+            "Triple colon should not create a block_component"
+        );
+    }
+
+    #[test]
+    fn inline_component_not_double_colon() {
+        // :: at inline level should not create an inline component.
+        let input = "::notinline";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        assert!(
+            nodes.iter().all(|n| n.kind != "inline_component"),
+            "Double colon should not create inline_component"
+        );
     }
 }

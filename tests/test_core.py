@@ -405,3 +405,175 @@ class TestRenderAst:
         html = oxydemark.render_ast(doc)
         assert '<a href="https://example.com"' in html
         assert "link text" in html
+
+
+# ---------------------------------------------------------------------------
+# Comark: emoji AST
+# ---------------------------------------------------------------------------
+
+
+class TestEmojiAST:
+    """Tests for emoji nodes in the AST."""
+
+    def test_emoji_node_kind(self):
+        ast = oxydemark.parse("Hello :wave:")
+        nodes = ast.walk()
+        emoji_nodes = [n for n in nodes if n.kind == "emoji"]
+        assert len(emoji_nodes) >= 1
+
+    def test_emoji_shortcode_attribute(self):
+        ast = oxydemark.parse(":wave:")
+        nodes = ast.walk()
+        emoji = next(n for n in nodes if n.kind == "emoji")
+        assert emoji.attributes["shortcode"] == "wave"
+
+    def test_emoji_text_content(self):
+        ast = oxydemark.parse(":wave:")
+        nodes = ast.walk()
+        emoji = next(n for n in nodes if n.kind == "emoji")
+        assert emoji.text == "\U0001f44b"  # 👋
+
+    def test_emoji_fast_path_render(self):
+        html = oxydemark.markdown_to_html(":wave:")
+        assert "\U0001f44b" in html
+
+    def test_emoji_ast_round_trip(self):
+        ast = oxydemark.parse(":wave:")
+        html = oxydemark.render_ast(ast)
+        assert "\U0001f44b" in html
+
+
+# ---------------------------------------------------------------------------
+# Comark: block components
+# ---------------------------------------------------------------------------
+
+
+class TestBlockComponents:
+    """Tests for block component parsing and rendering."""
+
+    def test_parse_block_component(self):
+        ast = oxydemark.parse("::note\nSome content\n::")
+        nodes = ast.walk()
+        bc = next((n for n in nodes if n.kind == "block_component"), None)
+        assert bc is not None
+        assert bc.attributes["name"] == "note"
+
+    def test_block_component_with_class(self):
+        ast = oxydemark.parse("::warning{.alert}\nBe careful\n::")
+        nodes = ast.walk()
+        bc = next(n for n in nodes if n.kind == "block_component")
+        assert bc.attributes["name"] == "warning"
+        assert bc.attributes["class"] == "alert"
+
+    def test_block_component_with_id(self):
+        ast = oxydemark.parse("::note{#important}\nContent\n::")
+        nodes = ast.walk()
+        bc = next(n for n in nodes if n.kind == "block_component")
+        assert bc.attributes["id"] == "important"
+
+    def test_block_component_with_key_value(self):
+        ast = oxydemark.parse('::note{type="info"}\nContent\n::')
+        nodes = ast.walk()
+        bc = next(n for n in nodes if n.kind == "block_component")
+        assert bc.attributes["type"] == "info"
+
+    def test_block_component_has_children(self):
+        ast = oxydemark.parse("::note\nHello world\n::")
+        nodes = ast.walk()
+        bc = next(n for n in nodes if n.kind == "block_component")
+        assert len(bc.children) > 0
+
+    def test_block_component_fast_path_render(self):
+        html = oxydemark.markdown_to_html("::note\nContent\n::")
+        assert "<div" in html
+        assert "</div>" in html
+
+    def test_block_component_ast_round_trip(self):
+        ast = oxydemark.parse("::note\nContent\n::")
+        html = oxydemark.render_ast(ast)
+        assert "<div" in html
+
+    def test_triple_colon_not_block_component(self):
+        ast = oxydemark.parse(":::note\nContent\n:::")
+        nodes = ast.walk()
+        assert all(n.kind != "block_component" for n in nodes)
+
+
+# ---------------------------------------------------------------------------
+# Comark: inline components
+# ---------------------------------------------------------------------------
+
+
+class TestInlineComponents:
+    """Tests for inline component parsing and rendering."""
+
+    def test_parse_inline_component_with_content(self):
+        ast = oxydemark.parse(":icon[star]")
+        nodes = ast.walk()
+        ic = next((n for n in nodes if n.kind == "inline_component"), None)
+        assert ic is not None
+        assert ic.attributes["name"] == "icon"
+
+    def test_inline_component_with_attrs(self):
+        ast = oxydemark.parse(":badge[Pro]{.premium}")
+        nodes = ast.walk()
+        ic = next(n for n in nodes if n.kind == "inline_component")
+        assert ic.attributes["name"] == "badge"
+        assert ic.attributes["class"] == "premium"
+
+    def test_inline_component_attrs_only(self):
+        ast = oxydemark.parse(':icon{type="star"}')
+        nodes = ast.walk()
+        ic = next(n for n in nodes if n.kind == "inline_component")
+        assert ic.attributes["name"] == "icon"
+        assert ic.attributes["type"] == "star"
+
+    def test_inline_component_fast_path_render(self):
+        html = oxydemark.markdown_to_html(":badge[Pro]{.premium}")
+        assert "<span" in html
+
+    def test_inline_component_ast_round_trip(self):
+        ast = oxydemark.parse(":badge[Pro]")
+        html = oxydemark.render_ast(ast)
+        assert "<span" in html
+
+
+# ---------------------------------------------------------------------------
+# Comark: span attributes
+# ---------------------------------------------------------------------------
+
+
+class TestSpanAttributes:
+    """Tests for span attribute parsing and rendering."""
+
+    def test_parse_span_with_class(self):
+        ast = oxydemark.parse("[important]{.highlight}")
+        nodes = ast.walk()
+        span = next((n for n in nodes if n.kind == "span"), None)
+        assert span is not None
+        assert span.attributes["class"] == "highlight"
+
+    def test_span_with_id(self):
+        ast = oxydemark.parse("[text]{#myid}")
+        nodes = ast.walk()
+        span = next(n for n in nodes if n.kind == "span")
+        assert span.attributes["id"] == "myid"
+
+    def test_span_with_multiple_classes(self):
+        ast = oxydemark.parse("[text]{.a .b .c}")
+        nodes = ast.walk()
+        span = next(n for n in nodes if n.kind == "span")
+        class_attr = span.attributes["class"]
+        assert "a" in class_attr
+        assert "b" in class_attr
+        assert "c" in class_attr
+
+    def test_span_fast_path_render(self):
+        html = oxydemark.markdown_to_html("[highlighted]{.mark}")
+        assert "<span" in html
+        assert 'class="mark"' in html
+
+    def test_span_ast_round_trip(self):
+        ast = oxydemark.parse("[highlighted]{.mark}")
+        html = oxydemark.render_ast(ast)
+        assert "<span" in html
