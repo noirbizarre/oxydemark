@@ -25,9 +25,9 @@ Markdown Input
 ## Quick Start
 
 ```python
-from oxydemark.api import MarkdownEngine
+from oxydemark.api import OxydeEngine
 
-engine = MarkdownEngine()
+engine = OxydeEngine()
 
 md = """
 # Hello OxydeMark
@@ -78,7 +78,7 @@ oxydemark/
 ├── src/lib.rs              # Rust core (PyO3 module)
 ├── python/oxydemark/       # Python package
 │   ├── __init__.py         # Re-exports from native module
-│   └── api.py              # MarkdownEngine, plugin protocol
+│   └── api.py              # OxydeEngine, plugin protocol
 ├── docs/specs/             # OMEPs (design decisions)
 ├── .github/workflows/      # CI pipeline
 ├── Cargo.toml              # Rust crate configuration

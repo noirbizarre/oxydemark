@@ -116,3 +116,5 @@ Links, references, follow-up actions.
 | [0003](OMEP-0003-changelog-management.md) | Changelog Management with git-cliff | accepted |
 | [0004](OMEP-0004-pre-commit-hooks.md) | Pre-commit Hooks with prek | accepted |
 | [0005](OMEP-0005-ci-cd-pipeline.md) | CI/CD Pipeline | accepted |
+| [0006](OMEP-0006-markdown-parser.md) | Markdown Parser -- Rushdown | accepted |
+| [0007](OMEP-0007-comark-syntax.md) | Extended Syntax -- Comark Specification | proposed |

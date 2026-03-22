@@ -28,7 +28,7 @@ oxydemark/
 ├── src/lib.rs              # Rust core: PyO3 module, parser, renderer
 ├── python/oxydemark/       # Python package
 │   ├── __init__.py         # Re-exports from native module
-│   └── api.py              # MarkdownEngine class, plugin protocol
+│   └── api.py              # OxydeEngine class, plugin protocol
 ├── docs/specs/             # OMEPs (design decisions, MADR format)
 ├── .github/workflows/      # CI pipeline
 ├── Cargo.toml              # Rust crate configuration

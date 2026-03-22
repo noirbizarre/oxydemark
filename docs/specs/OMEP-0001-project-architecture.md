@@ -49,7 +49,7 @@ preprocessing and postprocessing.
 
 * Good, because the Rust core can be optimized independently of the Python
   layer.
-* Good, because Python users get a familiar API (`MarkdownEngine`, plugin
+* Good, because Python users get a familiar API (`OxydeEngine`, plugin
   protocol) without needing to know Rust.
 * Good, because the architecture naturally separates concerns: Rust owns
   parsing/rendering, Python owns orchestration/plugins.
@@ -97,21 +97,26 @@ preprocessing and postprocessing.
 
 ```
 Markdown Input
-    -> Preprocessing Plugins (Python)
-    -> Rust Parser (AST generation)
-    -> AST Transformations (Rust plugins / pipeline)
-    -> Renderer (HTML or other formats)
-    -> Postprocessing Plugins (Python)
+    -> Preprocessing Plugins (Python, text-level)
+    -> Rust Parser / rushdown (AST generation)
+    -> AST exposed to Python (AstNode tree)
+    -> AST Transformation Plugins (Python, AST-level)
+    -> Rust Renderer (HTML generation)
+    -> Postprocessing Plugins (Python, HTML-level)
     -> Final Output
 ```
+
+The pipeline supports three plugin hook points: text-level preprocessing
+before parsing, AST-level transformation between parsing and rendering, and
+HTML-level postprocessing after rendering.
 
 **Project structure:**
 
 ```
-src/lib.rs              # Rust core (PyO3 module)
+src/lib.rs              # Rust core (PyO3 module, rushdown integration)
 python/oxydemark/       # Python package
 ├── __init__.py         # Re-exports from _core
-└── api.py              # MarkdownEngine, Plugin protocol
+└── api.py              # OxydeEngine, Plugin protocol
 Cargo.toml              # Rust crate config (cdylib + rlib)
 pyproject.toml          # maturin build backend
 ```
@@ -120,8 +125,13 @@ pyproject.toml          # maturin build backend
 
 | Dependency | Role |
 | ---------- | ---- |
-| PyO3 0.28  | Rust ↔ Python FFI bindings |
-| maturin    | Build backend for mixed Rust/Python packages |
+| PyO3 0.28 | Rust ↔ Python FFI bindings |
+| maturin | Build backend for mixed Rust/Python packages |
+| rushdown 0.11 | Markdown parser and HTML renderer (CommonMark + GFM) |
+| rushdown-meta 0.9 | YAML frontmatter extension |
+| rushdown-emoji 0.9 | Emoji shortcode extension |
 
 See also: [PyO3 User Guide](https://pyo3.rs/),
-[maturin docs](https://www.maturin.rs/).
+[maturin docs](https://www.maturin.rs/),
+[OMEP-0006](OMEP-0006-markdown-parser.md) (parser choice),
+[OMEP-0007](OMEP-0007-comark-syntax.md) (extended syntax).

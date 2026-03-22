@@ -14,4 +14,7 @@ name = "oxydemark"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.28", features = ["extension-module"] }
+pyo3 = "0.28"
+rushdown = "0.11"
+rushdown-meta = "0.9"
+rushdown-emoji = "0.9"

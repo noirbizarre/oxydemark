@@ -29,7 +29,14 @@ Homepage = "https://github.com/noirbizarre/oxydemark"
 Repository = "https://github.com/noirbizarre/oxydemark"
 Issues = "https://github.com/noirbizarre/oxydemark/issues"
 
+[dependency-groups]
+test = ["pytest>=8"]
+bench = ["pytest>=8", "pytest-benchmark>=5", "markdown-it-py>=3", "markdown>=3"]
+
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
 module-name = "oxydemark._core"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
