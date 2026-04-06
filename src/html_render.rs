@@ -101,7 +101,7 @@ fn render_node(w: &mut String, node: &AstNode) {
         "link" => {
             let href = node.attributes.get("href").map_or("", |v| v.as_str());
             write!(w, "<a href=\"{}\"", html_escape_attr(href)).unwrap();
-            render_html_attributes(w, node, &["href", "level"]);
+            render_html_attributes(w, node, &["href"]);
             w.push('>');
             render_children(w, node);
             w.push_str("</a>");
@@ -109,7 +109,7 @@ fn render_node(w: &mut String, node: &AstNode) {
         "image" => {
             let src = node.attributes.get("src").map_or("", |v| v.as_str());
             write!(w, "<img src=\"{}\"", html_escape_attr(src)).unwrap();
-            render_html_attributes(w, node, &["src", "level"]);
+            render_html_attributes(w, node, &["src"]);
             let alt = collect_text(node);
             if !alt.is_empty() {
                 write!(w, " alt=\"{}\"", html_escape_attr(&alt)).unwrap();
@@ -182,7 +182,7 @@ fn render_node(w: &mut String, node: &AstNode) {
             render_children(w, node);
             w.push_str("</span>");
         }
-        "span" => {
+        "span_attributes" => {
             // Span attributes: render as <span> with attributes.
             w.push_str("<span");
             render_html_attributes(w, node, &[]);

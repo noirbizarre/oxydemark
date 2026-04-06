@@ -48,7 +48,7 @@ description = "Run all CI checks locally"
 depends = ["fmt:check", "lint", "test"]
 
 [tasks.setup]
-description = "Set up the development environment"
+description = "Install pre-commit hooks via prek"
 run = "prek install"
 
 [tasks.cover]

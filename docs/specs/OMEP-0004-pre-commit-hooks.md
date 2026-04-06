@@ -106,8 +106,8 @@ common hooks.
 | `end-of-file-fixer` | builtin | pre-commit |
 | `check-toml` | builtin | pre-commit |
 | `check-yaml` | builtin | pre-commit |
-| `check-merge-conflict` | pre-commit-hooks | pre-commit |
-| `check-added-large-files` | pre-commit-hooks | pre-commit |
+| `check-merge-conflict` | builtin | pre-commit |
+| `check-added-large-files` | builtin | pre-commit |
 | `conventional-pre-commit` | conventional-pre-commit | commit-msg |
 | `cargo-fmt` | local (system) | pre-commit |
 | `cargo-clippy` | local (system) | pre-commit |

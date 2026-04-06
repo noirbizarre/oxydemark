@@ -165,12 +165,12 @@ Leverages existing rushdown features and ecosystem extensions:
 * **Emoji shortcodes** -- via `rushdown-emoji`
 * **Heading attributes** -- via rushdown's built-in `attributes` parser option
 
-### Phase 2 (planned)
+### Phase 2 (implemented)
 
-Custom rushdown parser extensions to implement:
+Custom rushdown parser extensions implemented in `src/extensions.rs`:
 
 * **Element attributes** -- `{.class #id key="value"}` on strong, emphasis,
-  links, images, code spans
+  links, images, code spans (via rushdown's built-in `attributes` parser option)
 * **Span attributes** -- `[text]{.class}` inline span syntax
 * **Block components** -- `::component{props}` syntax
 * **Inline components** -- `:component[content]{props}` syntax

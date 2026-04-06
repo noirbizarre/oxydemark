@@ -293,23 +293,6 @@ class TestMarkdownToHtml:
 
 
 # ---------------------------------------------------------------------------
-# render() (legacy)
-# ---------------------------------------------------------------------------
-
-
-class TestRenderLegacy:
-    """Tests for the legacy render() function."""
-
-    def test_basic(self):
-        html = oxydemark.render("Hello")
-        assert "Hello" in html
-
-    def test_equivalent_to_markdown_to_html(self):
-        md = "# Test\n\nSome *text* with **bold**."
-        assert oxydemark.render(md) == oxydemark.markdown_to_html(md)
-
-
-# ---------------------------------------------------------------------------
 # render_ast()
 # ---------------------------------------------------------------------------
 
@@ -549,20 +532,20 @@ class TestSpanAttributes:
     def test_parse_span_with_class(self):
         ast = oxydemark.parse("[important]{.highlight}")
         nodes = ast.walk()
-        span = next((n for n in nodes if n.kind == "span"), None)
+        span = next((n for n in nodes if n.kind == "span_attributes"), None)
         assert span is not None
         assert span.attributes["class"] == "highlight"
 
     def test_span_with_id(self):
         ast = oxydemark.parse("[text]{#myid}")
         nodes = ast.walk()
-        span = next(n for n in nodes if n.kind == "span")
+        span = next(n for n in nodes if n.kind == "span_attributes")
         assert span.attributes["id"] == "myid"
 
     def test_span_with_multiple_classes(self):
         ast = oxydemark.parse("[text]{.a .b .c}")
         nodes = ast.walk()
-        span = next(n for n in nodes if n.kind == "span")
+        span = next(n for n in nodes if n.kind == "span_attributes")
         class_attr = span.attributes["class"]
         assert "a" in class_attr
         assert "b" in class_attr

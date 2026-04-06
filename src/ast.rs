@@ -166,7 +166,7 @@ fn kind_name(node: &ast::Node) -> &'static str {
                 .downcast_ref::<SpanAttributes>()
                 .is_some()
             {
-                "span"
+                "span_attributes"
             } else {
                 "unknown"
             }

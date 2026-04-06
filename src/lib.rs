@@ -133,20 +133,11 @@ fn markdown_to_html(markdown: &str) -> PyResult<String> {
     })
 }
 
-/// Render Markdown input to HTML (legacy API, kept for backward compatibility).
-///
-/// This delegates to `markdown_to_html` and is equivalent to the fast path.
-#[pyfunction]
-fn render(markdown: &str) -> PyResult<String> {
-    markdown_to_html(markdown)
-}
-
 /// The native Python module implemented in Rust.
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<AstNode>()?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
-    m.add_function(wrap_pyfunction!(render, m)?)?;
     m.add_function(wrap_pyfunction!(render_ast, m)?)?;
     m.add_function(wrap_pyfunction!(markdown_to_html, m)?)?;
     Ok(())
@@ -233,12 +224,6 @@ mod tests {
         assert!(ast.metadata.is_some());
         let meta = ast.metadata.as_ref().unwrap();
         assert_eq!(meta.get("title").map(|v| v.as_str()), Some("Hello"));
-    }
-
-    #[test]
-    fn legacy_render_works() {
-        let html = render("Hello").unwrap();
-        assert!(html.contains("Hello"));
     }
 
     // -----------------------------------------------------------------------
@@ -689,14 +674,6 @@ mod tests {
         assert_eq!(html_escape("<>&\""), "&lt;&gt;&amp;&quot;");
     }
 
-    #[test]
-    fn render_and_markdown_to_html_are_equivalent() {
-        let input = "# Test\n\nSome *text* with **bold**.";
-        let html1 = render(input).unwrap();
-        let html2 = markdown_to_html(input).unwrap();
-        assert_eq!(html1, html2);
-    }
-
     // -----------------------------------------------------------------------
     // Comark: emoji AST
     // -----------------------------------------------------------------------
@@ -934,7 +911,7 @@ mod tests {
         let nodes = ast.walk();
         let span = nodes
             .iter()
-            .find(|n| n.kind == "span")
+            .find(|n| n.kind == "span_attributes")
             .expect("Expected a span node");
         assert_eq!(
             span.attributes.get("class").map(|v| v.as_str()),
@@ -949,7 +926,7 @@ mod tests {
         let nodes = ast.walk();
         let span = nodes
             .iter()
-            .find(|n| n.kind == "span")
+            .find(|n| n.kind == "span_attributes")
             .expect("Expected a span node");
         assert_eq!(span.attributes.get("id").map(|v| v.as_str()), Some("myid"));
     }
@@ -961,7 +938,7 @@ mod tests {
         let nodes = ast.walk();
         let span = nodes
             .iter()
-            .find(|n| n.kind == "span")
+            .find(|n| n.kind == "span_attributes")
             .expect("Expected a span node");
         let class = span.attributes.get("class").map(|v| v.as_str()).unwrap();
         assert!(class.contains("a"), "Expected class 'a' in: {class}");

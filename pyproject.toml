@@ -12,7 +12,7 @@ requires-python = ">=3.12"
 authors = [
     { name = "Axel H.", email = "noirbizarre@users.noreply.github.com" },
 ]
-keywords = ["markdown", "pipeline", "extensible", "rust"]
+keywords = ["ast", "extensible", "markdown", "pipeline", "rust"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",

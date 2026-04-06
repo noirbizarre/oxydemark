@@ -13,11 +13,12 @@ via PyO3/maturin.
 
 ```
 Markdown Input
-    -> Preprocessing Plugins (Python)
-    -> Rust Parser (AST generation)
-    -> AST Transformations (Rust plugins / pipeline)
-    -> Renderer (HTML or other formats)
-    -> Postprocessing Plugins (Python)
+    -> Preprocessing Plugins (Python, text-level)
+    -> Rust Parser / rushdown (AST generation)
+    -> AST exposed to Python (AstNode tree)
+    -> AST Transformation Plugins (Python, AST-level)
+    -> Rust Renderer (HTML generation)
+    -> Postprocessing Plugins (Python, HTML-level)
     -> Final Output
 ```
 
@@ -25,7 +26,11 @@ Markdown Input
 
 ```
 oxydemark/
-├── src/lib.rs              # Rust core: PyO3 module, parser, renderer
+├── src/                    # Rust core
+│   ├── lib.rs              # PyO3 module, parser/renderer wiring
+│   ├── ast.rs              # AstNode definition, arena-to-tree conversion
+│   ├── extensions.rs       # Comark parser/renderer extensions
+│   └── html_render.rs      # AST-to-HTML renderer
 ├── python/oxydemark/       # Python package
 │   ├── __init__.py         # Re-exports from native module
 │   └── api.py              # OxydeEngine class, plugin protocol
@@ -58,13 +63,17 @@ All tasks are defined in `mise.toml`. Use `mise run <task>`:
 
 ```sh
 mise run build          # cargo build
-mise run test           # cargo nextest run
+mise run test           # cargo nextest run (Rust only)
+mise run test:python    # pytest (Python only)
+mise run test:all       # both Rust and Python test suites
 mise run lint           # cargo clippy -- -D warnings
 mise run fmt            # cargo fmt
 mise run fmt:check      # cargo fmt -- --check
 mise run ci             # runs fmt:check + lint + test
 mise run changelog      # generate CHANGELOG.md
-mise run coverage       # cargo llvm-cov
+mise run changelog:preview  # preview unreleased changelog entries
+mise run cover          # cargo llvm-cov
+mise run bench          # Python benchmarks comparing Markdown libraries
 mise run setup          # install pre-commit hooks via prek
 ```
 

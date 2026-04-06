@@ -14,29 +14,13 @@ rendering with **Python bindings** (via PyO3) for a flexible plugin system.
 
 ```
 Markdown Input
-    -> Preprocessing Plugins (Python)
-    -> Rust Parser (AST generation)
-    -> AST Transformations (Rust plugins / pipeline)
-    -> Renderer (HTML or other formats)
-    -> Postprocessing Plugins (Python)
+    -> Preprocessing Plugins (Python, text-level)
+    -> Rust Parser / rushdown (AST generation)
+    -> AST exposed to Python (AstNode tree)
+    -> AST Transformation Plugins (Python, AST-level)
+    -> Rust Renderer (HTML generation)
+    -> Postprocessing Plugins (Python, HTML-level)
     -> Final Output
-```
-
-## Quick Start
-
-```python
-from oxydemark.api import OxydeEngine
-
-engine = OxydeEngine()
-
-md = """
-# Hello OxydeMark
-
-This is **extensible Markdown**.
-"""
-
-html = engine.render(md)
-print(html)
 ```
 
 ## Installation
@@ -52,6 +36,23 @@ cd oxydemark
 # Install tools and build
 mise install
 maturin develop
+```
+
+## Quick Start
+
+```python
+from oxydemark import OxydeEngine
+
+engine = OxydeEngine()
+
+md = """
+# Hello OxydeMark
+
+This is **extensible Markdown**.
+"""
+
+html = engine.render(md)
+print(html)
 ```
 
 ## Development
@@ -75,7 +76,11 @@ mise run ci           # Run all checks
 
 ```
 oxydemark/
-├── src/lib.rs              # Rust core (PyO3 module)
+├── src/                    # Rust core
+│   ├── lib.rs              # PyO3 module, parser/renderer wiring
+│   ├── ast.rs              # AstNode definition, arena-to-tree conversion
+│   ├── extensions.rs       # Comark parser/renderer extensions
+│   └── html_render.rs      # AST-to-HTML renderer
 ├── python/oxydemark/       # Python package
 │   ├── __init__.py         # Re-exports from native module
 │   └── api.py              # OxydeEngine, plugin protocol
@@ -85,7 +90,9 @@ oxydemark/
 ├── pyproject.toml          # Python build config (maturin)
 ├── mise.toml               # Task runner and tool versions
 ├── cliff.toml              # Changelog generation
-└── prek.toml               # Pre-commit hooks
+├── prek.toml               # Pre-commit hooks
+├── CONTRIBUTING.md         # Contribution guidelines
+└── LICENSE                 # MIT License
 ```
 
 ## Design Decisions

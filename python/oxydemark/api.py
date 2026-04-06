@@ -22,7 +22,7 @@ class Plugin(Protocol):
 
     def preprocess(self, markdown: str) -> str:
         """Transform raw Markdown *before* it reaches the Rust parser."""
-        ...
+        return markdown
 
     def transform(self, ast: AstNode) -> AstNode:
         """Transform the AST *between* parsing and rendering.
@@ -46,11 +46,11 @@ class Plugin(Protocol):
                     self._modify(child)
                 node.children = children
         """
-        ...
+        return ast
 
     def postprocess(self, html: str) -> str:
         """Transform rendered HTML *after* it leaves the Rust renderer."""
-        ...
+        return html
 
 
 class OxydeEngine:

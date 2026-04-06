@@ -6,7 +6,7 @@ description = "Extensible Markdown pipelines powered by Rust"
 license = "MIT"
 repository = "https://github.com/noirbizarre/oxydemark"
 readme = "README.md"
-keywords = ["markdown", "pipeline", "ast", "pyo3"]
+keywords = ["extensible", "markdown", "pipeline", "ast", "pyo3"]
 categories = ["text-processing", "parser-implementations"]
 
 [lib]

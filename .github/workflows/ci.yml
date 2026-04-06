@@ -64,8 +64,12 @@ jobs:
         run: cargo build
 
   python:
-    name: Python wheel
+    name: Python wheel (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
@@ -75,7 +79,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install maturin
         run: pip install maturin
@@ -86,7 +90,7 @@ jobs:
       - name: Install and smoke-test
         run: |
           pip install target/wheels/*.whl
-          python -c "import oxydemark; print(oxydemark.render('hello'))"
+          python -c "import oxydemark; print(oxydemark.markdown_to_html('hello'))"
 
   changelog:
     name: Changelog

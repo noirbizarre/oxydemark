@@ -88,17 +88,21 @@ version managers (rustup overrides, pyenv, asdf).
 
 **Defined tasks:**
 
-| Task             | Command                   |
-| ---------------- | ------------------------- |
-| `build`          | `cargo build`             |
-| `test`           | `cargo nextest run`       |
-| `lint`           | `cargo clippy -- -D warnings` |
-| `fmt`            | `cargo fmt`               |
-| `fmt:check`      | `cargo fmt -- --check`    |
-| `ci`             | depends on fmt:check, lint, test |
-| `changelog`      | `git cliff --output CHANGELOG.md` |
-| `coverage`       | `cargo llvm-cov`          |
-| `setup`          | `prek install`            |
+| Task               | Command                          |
+| ------------------ | -------------------------------- |
+| `build`            | `cargo build`                    |
+| `test`             | `cargo nextest run`              |
+| `test:python`      | `uv run --group test pytest`     |
+| `test:all`         | depends on test, test:python     |
+| `lint`             | `cargo clippy -- -D warnings`    |
+| `fmt`              | `cargo fmt`                      |
+| `fmt:check`        | `cargo fmt -- --check`           |
+| `ci`               | depends on fmt:check, lint, test |
+| `changelog`        | `git cliff --output CHANGELOG.md`|
+| `changelog:preview`| `git cliff --unreleased`         |
+| `cover`            | `cargo llvm-cov`                 |
+| `bench`            | `uv run --group bench pytest benchmarks/ --benchmark-only` |
+| `setup`            | `prek install`                   |
 
 **Managed tools:**
 

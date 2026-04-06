@@ -48,17 +48,21 @@ you get started.
 All tasks are managed through [mise](https://mise.jdx.dev/). Run `mise tasks`
 to see the full list.
 
-| Task                | Description                              |
-| ------------------- | ---------------------------------------- |
-| `mise run build`    | Build the Rust crate                     |
-| `mise run test`     | Run the test suite with nextest          |
-| `mise run lint`     | Run clippy lints                         |
-| `mise run fmt`      | Format Rust source code                  |
-| `mise run fmt:check`| Check formatting without modifying files |
-| `mise run ci`       | Run all CI checks locally                |
-| `mise run changelog`| Generate `CHANGELOG.md`                  |
-| `mise run coverage` | Generate code coverage report            |
-| `mise run setup`    | Install pre-commit hooks                 |
+| Task                    | Description                              |
+| ----------------------- | ---------------------------------------- |
+| `mise run build`        | Build the Rust crate                     |
+| `mise run test`         | Run the Rust test suite with nextest     |
+| `mise run test:python`  | Run the Python test suite with pytest    |
+| `mise run test:all`     | Run both Rust and Python test suites     |
+| `mise run lint`         | Run clippy lints                         |
+| `mise run fmt`          | Format Rust source code                  |
+| `mise run fmt:check`    | Check formatting without modifying files |
+| `mise run ci`           | Run all CI checks locally                |
+| `mise run changelog`    | Generate `CHANGELOG.md`                  |
+| `mise run changelog:preview` | Preview unreleased changelog entries |
+| `mise run cover`        | Generate code coverage report            |
+| `mise run bench`        | Run Python benchmarks                    |
+| `mise run setup`        | Install pre-commit hooks                 |
 
 ## Code Style
 
