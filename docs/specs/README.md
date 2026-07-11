@@ -118,3 +118,4 @@ Links, references, follow-up actions.
 | [0005](OMEP-0005-ci-cd-pipeline.md) | CI/CD Pipeline | accepted |
 | [0006](OMEP-0006-markdown-parser.md) | Markdown Parser -- Rushdown | accepted |
 | [0007](OMEP-0007-comark-syntax.md) | Extended Syntax -- Comark Specification | accepted |
+| [0008](OMEP-0008-public-api.md) | Public API Stability & Versioning Policy | accepted |
