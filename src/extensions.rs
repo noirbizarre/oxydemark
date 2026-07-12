@@ -90,6 +90,39 @@ impl From<InlineComponent> for KindData {
     }
 }
 
+/// A named slot node inside a block component: `#slot-name`.
+///
+/// A slot partitions a block component body into named sections. The slot
+/// name is stored on the node and surfaced to Python as `attributes["name"]`.
+/// Content following the marker (until the next marker or the closing `::`)
+/// becomes the slot's children.
+#[derive(Debug)]
+pub(crate) struct Slot {
+    pub(crate) name: String,
+}
+
+impl NodeKind for Slot {
+    fn typ(&self) -> NodeType {
+        NodeType::ContainerBlock
+    }
+
+    fn kind_name(&self) -> &'static str {
+        "Slot"
+    }
+}
+
+impl PrettyPrint for Slot {
+    fn pretty_print(&self, w: &mut dyn fmt::Write, _source: &str, level: usize) -> fmt::Result {
+        writeln!(w, "{}name: {}", pp_indent(level), self.name)
+    }
+}
+
+impl From<Slot> for KindData {
+    fn from(e: Slot) -> Self {
+        KindData::Extension(Box::new(e))
+    }
+}
+
 /// A span attribute node: `[text]{.class #id key="val"}`.
 ///
 /// Wraps inline content with HTML attributes. This is a pure wrapper node
@@ -221,6 +254,116 @@ pub(crate) fn block_component_parser_extension() -> impl ParserExtension {
             || Box::new(BlockComponentParser) as Box<dyn BlockParser>,
             NoParserOptions,
             650,
+        );
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Slot parser
+// ---------------------------------------------------------------------------
+
+/// If `line` is a slot marker (`#slot-name` as the sole content of the line),
+/// return the slot name.
+///
+/// A slot marker matches `^#[A-Za-z][A-Za-z0-9_-]*$` after trimming surrounding
+/// whitespace. This deliberately excludes ATX headings (`# Heading`), which
+/// require a space after the `#`.
+fn slot_marker_name(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    let name = trimmed.strip_prefix('#')?;
+    let mut chars = name.chars();
+    let first = chars.next()?;
+    if !first.is_ascii_alphabetic() {
+        return None;
+    }
+    if chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        Some(name)
+    } else {
+        None
+    }
+}
+
+/// Return `true` if `node_ref` refers to a [`BlockComponent`] extension node.
+fn is_block_component(arena: &Arena, node_ref: NodeRef) -> bool {
+    if let KindData::Extension(ext) = arena[node_ref].kind_data() {
+        (ext.as_ref() as &dyn std::any::Any)
+            .downcast_ref::<BlockComponent>()
+            .is_some()
+    } else {
+        false
+    }
+}
+
+/// Parses component slots: `#slot-name` markers inside a block component body.
+///
+/// A slot marker opens a [`Slot`] container whose children are the blocks that
+/// follow it, up to the next slot marker or the component's closing `::`. Slot
+/// markers are only recognized when the direct parent is a [`BlockComponent`],
+/// so `#slot-name` lines outside components are left to the normal parsers.
+#[derive(Debug)]
+struct SlotParser;
+
+impl BlockParser for SlotParser {
+    fn trigger(&self) -> &[u8] {
+        b"#"
+    }
+
+    fn open(
+        &self,
+        arena: &mut Arena,
+        parent_ref: NodeRef,
+        reader: &mut text::BasicReader,
+        _ctx: &mut Context,
+    ) -> Option<(NodeRef, State)> {
+        // Slots only exist at the top level of a block-component body.
+        if !is_block_component(arena, parent_ref) {
+            return None;
+        }
+
+        let (line_bytes, _seg) = reader.peek_line_bytes()?;
+        let line = std::str::from_utf8(&line_bytes).ok()?;
+        let name = slot_marker_name(line)?;
+
+        let node_ref = arena.new_node(Slot {
+            name: name.to_string(),
+        });
+
+        reader.advance_line();
+        Some((node_ref, State::HAS_CHILDREN))
+    }
+
+    fn cont(
+        &self,
+        _arena: &mut Arena,
+        _node_ref: NodeRef,
+        reader: &mut text::BasicReader,
+        _ctx: &mut Context,
+    ) -> Option<State> {
+        let (line_bytes, _seg) = reader.peek_line_bytes()?;
+        let line = std::str::from_utf8(&line_bytes).ok()?;
+        let trimmed = line.trim();
+
+        // The closing `::` of the enclosing component or the next slot marker
+        // both end this slot; the line is left for the parent/sibling parser.
+        if trimmed == "::" || slot_marker_name(line).is_some() {
+            return None;
+        }
+
+        Some(State::HAS_CHILDREN)
+    }
+
+    fn can_interrupt_paragraph(&self) -> bool {
+        true
+    }
+}
+
+/// Parser extension function for component slots.
+pub(crate) fn slot_parser_extension() -> impl ParserExtension {
+    parser::ParserExtensionFn::new(|parser: &mut Parser| {
+        parser.add_block_parser(
+            || Box::new(SlotParser) as Box<dyn BlockParser>,
+            NoParserOptions,
+            550,
         );
     })
 }
@@ -654,6 +797,51 @@ pub(crate) fn block_component_html_renderer_extension()
 -> impl html::RendererExtension<'static, String> {
     html::RendererExtensionFn::new(|renderer: &mut html::Renderer<'_, String>| {
         renderer.add_node_renderer(|| BlockComponentHtmlRenderer, NoRendererOptions);
+    })
+}
+
+/// Renders slots as `<div data-slot="name">` wrappers.
+#[derive(Debug)]
+struct SlotHtmlRenderer;
+
+impl<W: TextWrite> RenderNode<W> for SlotHtmlRenderer {
+    fn render_node<'a>(
+        &self,
+        writer: &mut W,
+        _source: &'a str,
+        arena: &'a Arena,
+        node_ref: NodeRef,
+        entering: bool,
+        _context: &mut renderer::Context,
+    ) -> rushdown::Result<ast::WalkStatus> {
+        if entering {
+            let name = match arena[node_ref].kind_data() {
+                KindData::Extension(ext) => (ext.as_ref() as &dyn std::any::Any)
+                    .downcast_ref::<Slot>()
+                    .map(|slot| slot.name.as_str())
+                    .unwrap_or_default(),
+                _ => "",
+            };
+            writer.write_str("<div data-slot=\"")?;
+            writer.write_str(&html_escape(name))?;
+            writer.write_str("\">\n")?;
+        } else {
+            writer.write_str("</div>\n")?;
+        }
+        Ok(ast::WalkStatus::Continue)
+    }
+}
+
+impl<'r, W: TextWrite> NodeRenderer<'r, W> for SlotHtmlRenderer {
+    fn register_node_renderer_fn(self, nrr: &mut impl NodeRendererRegistry<'r, W>) {
+        nrr.register_node_renderer_fn(std::any::TypeId::of::<Slot>(), BoxRenderNode::new(self));
+    }
+}
+
+/// Extension function to register the slot HTML renderer.
+pub(crate) fn slot_html_renderer_extension() -> impl html::RendererExtension<'static, String> {
+    html::RendererExtensionFn::new(|renderer: &mut html::Renderer<'_, String>| {
+        renderer.add_node_renderer(|| SlotHtmlRenderer, NoRendererOptions);
     })
 }
 

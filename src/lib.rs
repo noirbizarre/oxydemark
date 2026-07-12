@@ -13,7 +13,8 @@ use ast::AstNode;
 use extensions::{
     block_component_html_renderer_extension, block_component_parser_extension,
     inline_component_html_renderer_extension, inline_component_parser_extension,
-    span_attribute_html_renderer_extension, span_attribute_parser_extension,
+    slot_html_renderer_extension, slot_parser_extension, span_attribute_html_renderer_extension,
+    span_attribute_parser_extension,
 };
 use html_render::render_ast_to_html;
 use rushdown_emoji::{
@@ -32,6 +33,7 @@ fn build_parser() -> Parser {
         .and(meta_parser_extension(MetaParserOptions::default()))
         .and(emoji_parser_extension(EmojiParserOptions::default()))
         .and(block_component_parser_extension())
+        .and(slot_parser_extension())
         .and(inline_component_parser_extension())
         .and(span_attribute_parser_extension());
     let options = parser::Options {
@@ -47,6 +49,7 @@ fn build_renderer() -> html::Renderer<'static, String> {
         html::Options::default(),
         emoji_html_renderer_extension(EmojiHtmlRendererOptions::default())
             .and(block_component_html_renderer_extension())
+            .and(slot_html_renderer_extension())
             .and(inline_component_html_renderer_extension())
             .and(span_attribute_html_renderer_extension()),
     )
@@ -831,6 +834,165 @@ mod tests {
         assert!(
             html.contains("<div"),
             "Block component round-trip should produce <div>, got: {html}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Comark: component slots
+    // -----------------------------------------------------------------------
+
+    /// Find the first `block_component` node in a document.
+    fn find_block_component(ast: &AstNode) -> &AstNode {
+        ast.children
+            .iter()
+            .find(|n| n.kind == "block_component")
+            .expect("Expected a block_component node")
+    }
+
+    #[test]
+    fn parse_single_named_slot() {
+        let input = "::card\n#header\n## Card Title\n::";
+        let ast = parse(input).unwrap();
+        let card = find_block_component(&ast);
+
+        let slots: Vec<&AstNode> = card.children.iter().filter(|n| n.kind == "slot").collect();
+        assert_eq!(slots.len(), 1, "Expected exactly one slot");
+
+        let header = slots[0];
+        assert_eq!(
+            header.attributes.get("name").map(|v| v.as_str()),
+            Some("header")
+        );
+        assert_eq!(
+            header.children.first().map(|c| c.kind.as_str()),
+            Some("heading"),
+            "Slot should contain the heading content"
+        );
+    }
+
+    #[test]
+    fn parse_multiple_named_slots() {
+        let input = "::card\n#header\n## Card Title\n\n#content\nMain content here.\n::";
+        let ast = parse(input).unwrap();
+        let card = find_block_component(&ast);
+
+        let slots: Vec<&AstNode> = card.children.iter().filter(|n| n.kind == "slot").collect();
+        assert_eq!(slots.len(), 2, "Expected header and content slots");
+
+        assert_eq!(
+            slots[0].attributes.get("name").map(|v| v.as_str()),
+            Some("header")
+        );
+        assert_eq!(
+            slots[0].children.first().map(|c| c.kind.as_str()),
+            Some("heading")
+        );
+
+        assert_eq!(
+            slots[1].attributes.get("name").map(|v| v.as_str()),
+            Some("content")
+        );
+        assert_eq!(
+            slots[1].children.first().map(|c| c.kind.as_str()),
+            Some("paragraph")
+        );
+    }
+
+    #[test]
+    fn parse_explicit_default_slot() {
+        let input = "::card\n#default\nDefault content.\n\n#footer\nFooter here.\n::";
+        let ast = parse(input).unwrap();
+        let card = find_block_component(&ast);
+
+        let slots: Vec<&AstNode> = card.children.iter().filter(|n| n.kind == "slot").collect();
+        assert_eq!(slots.len(), 2, "Expected default and footer slots");
+        assert_eq!(
+            slots[0].attributes.get("name").map(|v| v.as_str()),
+            Some("default")
+        );
+        assert_eq!(
+            slots[1].attributes.get("name").map(|v| v.as_str()),
+            Some("footer")
+        );
+    }
+
+    #[test]
+    fn parse_implicit_default_slot_not_wrapped() {
+        // Content before the first slot marker is a direct child (no slot wrapper),
+        // preserving backward-compatible block_component handling.
+        let input = "::card\nBefore slot.\n\n#header\nHeader content.\n::";
+        let ast = parse(input).unwrap();
+        let card = find_block_component(&ast);
+
+        assert_eq!(
+            card.children.first().map(|c| c.kind.as_str()),
+            Some("paragraph"),
+            "Implicit default content should be a direct paragraph child"
+        );
+
+        let slots: Vec<&AstNode> = card.children.iter().filter(|n| n.kind == "slot").collect();
+        assert_eq!(slots.len(), 1, "Only the explicit #header slot is wrapped");
+        assert_eq!(
+            slots[0].attributes.get("name").map(|v| v.as_str()),
+            Some("header")
+        );
+    }
+
+    #[test]
+    fn parse_component_without_slots_has_no_slot_nodes() {
+        let input = "::alert{type=\"info\"}\nJust content, no slots.\n::";
+        let ast = parse(input).unwrap();
+        let alert = find_block_component(&ast);
+
+        assert!(
+            alert.children.iter().all(|n| n.kind != "slot"),
+            "Component without markers should not contain slot nodes"
+        );
+        assert_eq!(
+            alert.children.first().map(|c| c.kind.as_str()),
+            Some("paragraph")
+        );
+    }
+
+    #[test]
+    fn slot_marker_outside_component_is_not_a_slot() {
+        // A `#name` line at document top level is a normal paragraph, and a
+        // real ATX heading (`# name`) is unaffected.
+        let input = "#header\n\n# Real Heading";
+        let ast = parse(input).unwrap();
+        let nodes = ast.walk();
+        assert!(
+            nodes.iter().all(|n| n.kind != "slot"),
+            "No slot nodes should be produced outside a component"
+        );
+        assert!(
+            nodes.iter().any(|n| n.kind == "heading"),
+            "The `# Real Heading` line should still parse as a heading"
+        );
+    }
+
+    #[test]
+    fn render_named_slots_emit_data_slot_wrappers() {
+        let input = "::card\n#header\n## Card Title\n\n#content\nMain content here.\n::";
+        let html = markdown_to_html(input).unwrap();
+        assert!(
+            html.contains("data-slot=\"header\""),
+            "Expected header slot wrapper, got: {html}"
+        );
+        assert!(
+            html.contains("data-slot=\"content\""),
+            "Expected content slot wrapper, got: {html}"
+        );
+    }
+
+    #[test]
+    fn render_slot_ast_round_trip() {
+        let input = "::card\n#header\n## Card Title\n::";
+        let ast = parse(input).unwrap();
+        let html = render_ast_to_html(&ast);
+        assert!(
+            html.contains("data-slot=\"header\""),
+            "Slot round-trip should emit data-slot wrapper, got: {html}"
         );
     }
 

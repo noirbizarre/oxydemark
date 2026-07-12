@@ -174,6 +174,17 @@ fn render_node(w: &mut String, node: &AstNode) {
             render_children(w, node);
             w.push_str("</div>\n");
         }
+        "slot" => {
+            // Slots render as <div data-slot="name"> wrappers.
+            let name = node
+                .attributes
+                .get("name")
+                .map(String::as_str)
+                .unwrap_or("");
+            writeln!(w, "<div data-slot=\"{}\">", html_escape_attr(name)).unwrap();
+            render_children(w, node);
+            w.push_str("</div>\n");
+        }
         "inline_component" => {
             // Passthrough: render as a bare <span> with attributes.
             w.push_str("<span");

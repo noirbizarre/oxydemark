@@ -11,7 +11,7 @@ use rushdown::as_kind_data;
 use rushdown::ast::{self, KindData, NodeRef, TextQualifier};
 use rushdown_emoji::Emoji;
 
-use crate::extensions::{BlockComponent, InlineComponent, SpanAttributes};
+use crate::extensions::{BlockComponent, InlineComponent, Slot, SpanAttributes};
 
 /// A Python-friendly AST node representing a Markdown element.
 ///
@@ -163,6 +163,11 @@ fn kind_name(node: &ast::Node) -> &'static str {
             {
                 "inline_component"
             } else if (ext.as_ref() as &dyn std::any::Any)
+                .downcast_ref::<Slot>()
+                .is_some()
+            {
+                "slot"
+            } else if (ext.as_ref() as &dyn std::any::Any)
                 .downcast_ref::<SpanAttributes>()
                 .is_some()
             {
@@ -250,6 +255,8 @@ fn node_attributes(node: &ast::Node, source: &str) -> HashMap<String, String> {
                 (ext.as_ref() as &dyn std::any::Any).downcast_ref::<InlineComponent>()
             {
                 attrs.insert("name".to_string(), ic.name.clone());
+            } else if let Some(slot) = (ext.as_ref() as &dyn std::any::Any).downcast_ref::<Slot>() {
+                attrs.insert("name".to_string(), slot.name.clone());
             }
         }
         _ => {}
