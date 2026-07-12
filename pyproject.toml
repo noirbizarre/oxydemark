@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
     "Topic :: Text Processing :: Markup :: Markdown",
 ]
@@ -42,11 +43,8 @@ module-name = "oxydemark._core"
 # in the wheel (OMEP-0008), independently of maturin's default packaging.
 include = ["python/oxydemark/py.typed", "python/oxydemark/_core.pyi"]
 
-[tool.pytest.ini_options]
+[tool.pytest]
 testpaths = ["tests"]
 
 [tool.ty.src]
 include = ["python/oxydemark"]
-
-[tool.ty.environment]
-python-version = "3.12"
