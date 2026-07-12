@@ -526,6 +526,68 @@ class TestInlineComponents:
 # ---------------------------------------------------------------------------
 
 
+class TestHeadingAnchors:
+    """Tests for deterministic heading anchor/slug ids."""
+
+    def test_heading_gets_slug_id(self):
+        ast = oxydemark.parse("# Overview")
+        heading = ast.children[0]
+        assert heading.kind == "heading"
+        assert heading.attributes["id"] == "overview"
+
+    def test_multi_word_heading_slug(self):
+        ast = oxydemark.parse("# Hello World")
+        assert ast.children[0].attributes["id"] == "hello-world"
+
+    def test_duplicate_headings_get_suffixes(self):
+        ast = oxydemark.parse("## Overview\n\n## Overview\n\n## Overview")
+        headings = [c for c in ast.children if c.kind == "heading"]
+        ids = [h.attributes["id"] for h in headings]
+        assert ids == ["overview", "overview-1", "overview-2"]
+
+    def test_author_provided_id_wins(self):
+        ast = oxydemark.parse("## Title {#custom}\n\n## Custom")
+        headings = [c for c in ast.children if c.kind == "heading"]
+        assert headings[0].attributes["id"] == "custom"
+        assert headings[1].attributes["id"] == "custom-1"
+
+    def test_unicode_heading_normalized(self):
+        ast = oxydemark.parse("# Café")
+        assert ast.children[0].attributes["id"] == "cafe"
+
+    def test_punctuation_only_falls_back_to_section(self):
+        ast = oxydemark.parse("# ...")
+        assert ast.children[0].attributes["id"] == "section"
+
+    def test_fast_path_emits_id(self):
+        html = oxydemark.markdown_to_html("# Title")
+        assert 'id="title"' in html
+
+    def test_ast_round_trip_emits_id(self):
+        ast = oxydemark.parse("# Overview")
+        html = oxydemark.render_ast(ast)
+        assert 'id="overview"' in html
+
+
+class TestSlugify:
+    """Tests for the public slugify() function."""
+
+    def test_basic(self):
+        assert oxydemark.slugify("Hello World") == "hello-world"
+
+    def test_unicode(self):
+        assert oxydemark.slugify("Café") == "cafe"
+
+    def test_empty_falls_back(self):
+        assert oxydemark.slugify("...") == "section"
+
+    def test_disambiguation_with_existing(self):
+        assert oxydemark.slugify("Overview", ["overview"]) == "overview-1"
+
+    def test_no_collision_without_existing(self):
+        assert oxydemark.slugify("Overview") == "overview"
+
+
 class TestSpanAttributes:
     """Tests for span attribute parsing and rendering."""
 

@@ -1,6 +1,7 @@
 mod ast;
 mod extensions;
 mod html_render;
+mod slug;
 
 use std::cell::RefCell;
 
@@ -11,10 +12,10 @@ use rushdown::text;
 
 use ast::AstNode;
 use extensions::{
-    block_component_html_renderer_extension, block_component_parser_extension,
-    inline_component_html_renderer_extension, inline_component_parser_extension,
-    slot_html_renderer_extension, slot_parser_extension, span_attribute_html_renderer_extension,
-    span_attribute_parser_extension,
+    assign_heading_anchors, block_component_html_renderer_extension,
+    block_component_parser_extension, inline_component_html_renderer_extension,
+    inline_component_parser_extension, slot_html_renderer_extension, slot_parser_extension,
+    span_attribute_html_renderer_extension, span_attribute_parser_extension,
 };
 use html_render::render_ast_to_html;
 use rushdown_emoji::{
@@ -101,7 +102,8 @@ fn with_renderer<R>(f: impl FnOnce(&html::Renderer<'static, String>) -> R) -> R 
 fn parse(markdown: &str) -> PyResult<AstNode> {
     with_parser(|parser| {
         let mut reader = text::BasicReader::new(markdown);
-        let (arena, document_ref) = parser.parse(&mut reader);
+        let (mut arena, document_ref) = parser.parse(&mut reader);
+        assign_heading_anchors(&mut arena, document_ref, markdown);
         Ok(ast::arena_to_ast_node(&arena, document_ref, markdown))
     })
 }
@@ -124,7 +126,8 @@ fn render_ast(node: &AstNode) -> String {
 fn markdown_to_html(markdown: &str) -> PyResult<String> {
     with_parser(|parser| {
         let mut reader = text::BasicReader::new(markdown);
-        let (arena, document_ref) = parser.parse(&mut reader);
+        let (mut arena, document_ref) = parser.parse(&mut reader);
+        assign_heading_anchors(&mut arena, document_ref, markdown);
 
         with_renderer(|renderer| {
             let mut output = String::new();
@@ -136,6 +139,25 @@ fn markdown_to_html(markdown: &str) -> PyResult<String> {
     })
 }
 
+/// Generate a URL-friendly anchor slug from `text`.
+///
+/// Implements the OMEP-0010 anchor algorithm: Unicode NFKD normalization,
+/// lowercasing, reduction to a `[a-z0-9]`-and-`-` slug, and a `section`
+/// fallback for empty results. When `existing` is provided, the returned slug
+/// is disambiguated with a `-N` suffix so it does not collide with any entry;
+/// the caller is expected to add the returned slug to its own set.
+#[pyfunction]
+#[pyo3(signature = (text, existing=None))]
+fn slugify(text: &str, existing: Option<Vec<String>>) -> String {
+    match existing {
+        Some(items) => {
+            let mut set: std::collections::HashSet<String> = items.into_iter().collect();
+            slug::slugify_unique(text, &mut set)
+        }
+        None => slug::slugify_base(text),
+    }
+}
+
 /// The native Python module implemented in Rust.
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -143,6 +165,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(render_ast, m)?)?;
     m.add_function(wrap_pyfunction!(markdown_to_html, m)?)?;
+    m.add_function(wrap_pyfunction!(slugify, m)?)?;
     Ok(())
 }
 
@@ -1209,6 +1232,116 @@ mod tests {
         assert!(
             nodes.iter().all(|n| n.kind != "inline_component"),
             "Double colon should not create inline_component"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Heading anchors / slugs
+    // -----------------------------------------------------------------------
+
+    /// Collect all heading nodes from a parsed document in order.
+    fn headings(ast: &AstNode) -> Vec<&AstNode> {
+        ast.children
+            .iter()
+            .filter(|c| c.kind == "heading")
+            .collect()
+    }
+
+    #[test]
+    fn heading_gets_slug_id() {
+        let ast = parse("# Overview").unwrap();
+        let heading = &headings(&ast)[0];
+        assert_eq!(
+            heading.attributes.get("id").map(|v| v.as_str()),
+            Some("overview")
+        );
+    }
+
+    #[test]
+    fn duplicate_headings_get_suffixed_ids() {
+        let ast = parse("## Overview\n\n## Overview\n\n## Overview").unwrap();
+        let hs = headings(&ast);
+        let ids: Vec<&str> = hs
+            .iter()
+            .map(|h| h.attributes.get("id").map(|v| v.as_str()).unwrap())
+            .collect();
+        assert_eq!(ids, vec!["overview", "overview-1", "overview-2"]);
+    }
+
+    #[test]
+    fn author_provided_id_wins_and_is_reserved() {
+        // `## Title {#custom}` keeps its id verbatim; a later `## Custom`
+        // heading must avoid it.
+        let ast = parse("## Title {#custom}\n\n## Custom").unwrap();
+        let hs = headings(&ast);
+        assert_eq!(
+            hs[0].attributes.get("id").map(|v| v.as_str()),
+            Some("custom")
+        );
+        assert_eq!(
+            hs[1].attributes.get("id").map(|v| v.as_str()),
+            Some("custom-1")
+        );
+    }
+
+    #[test]
+    fn emoji_heading_uses_shortcode_in_slug() {
+        let ast = parse("# Hello :wave:").unwrap();
+        let id = headings(&ast)[0]
+            .attributes
+            .get("id")
+            .map(|v| v.as_str())
+            .unwrap();
+        assert!(id.contains("wave"), "Expected shortcode in id, got: {id}");
+        assert!(
+            !id.contains('\u{1F44B}'),
+            "Slug should not contain the emoji char, got: {id}"
+        );
+    }
+
+    #[test]
+    fn unicode_heading_is_normalized() {
+        let ast = parse("# Café").unwrap();
+        assert_eq!(
+            headings(&ast)[0].attributes.get("id").map(|v| v.as_str()),
+            Some("cafe")
+        );
+    }
+
+    #[test]
+    fn punctuation_only_heading_falls_back_to_section() {
+        let ast = parse("# ...").unwrap();
+        assert_eq!(
+            headings(&ast)[0].attributes.get("id").map(|v| v.as_str()),
+            Some("section")
+        );
+    }
+
+    #[test]
+    fn fast_path_emits_heading_id() {
+        let html = markdown_to_html("# Overview").unwrap();
+        assert!(
+            html.contains("id=\"overview\""),
+            "Fast path should emit heading id, got: {html}"
+        );
+    }
+
+    #[test]
+    fn ast_round_trip_emits_heading_id() {
+        let ast = parse("# Overview").unwrap();
+        let html = render_ast_to_html(&ast);
+        assert!(
+            html.contains("id=\"overview\""),
+            "AST round-trip should emit heading id, got: {html}"
+        );
+    }
+
+    #[test]
+    fn slugify_public_function() {
+        assert_eq!(slugify("Hello World", None), "hello-world");
+        assert_eq!(
+            slugify("Overview", Some(vec!["overview".to_string()])),
+            "overview-1"
         );
     }
 }

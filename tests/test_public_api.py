@@ -10,7 +10,8 @@ import importlib
 
 import oxydemark
 
-# The frozen public Python surface, per OMEP-0008.
+# The frozen public Python surface, per OMEP-0008, extended additively by
+# OMEP-0010 (slugify).
 PUBLIC_SURFACE = frozenset(
     {
         "AstNode",
@@ -19,6 +20,7 @@ PUBLIC_SURFACE = frozenset(
         "markdown_to_html",
         "parse",
         "render_ast",
+        "slugify",
     }
 )
 

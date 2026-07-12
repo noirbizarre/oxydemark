@@ -10,6 +10,8 @@
 
 use std::fmt;
 
+use std::collections::HashSet;
+
 use rushdown::ast::{self, Arena, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, pp_indent};
 use rushdown::parser::{
     self, BlockParser, Context, InlineParser, NoParserOptions, Parser, ParserExtension, State,
@@ -20,6 +22,7 @@ use rushdown::renderer::{
     RenderNode, TextWrite,
 };
 use rushdown::text::{self, Reader};
+use rushdown_emoji::Emoji;
 
 use crate::html_render::html_escape;
 
@@ -744,6 +747,91 @@ fn is_name_start(b: u8) -> bool {
 /// Check if a byte is valid as part of a component name.
 fn is_name_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
+}
+
+// ---------------------------------------------------------------------------
+// Heading anchor / slug assignment
+// ---------------------------------------------------------------------------
+
+/// Assign deterministic, collision-safe anchor `id`s to every heading.
+///
+/// Walks the arena in document order and populates each `heading` node's `id`
+/// attribute per the OMEP-0010 algorithm ([`crate::slug`]). Author-provided ids
+/// (e.g. `## Title {#custom}`, parsed via the `attributes: true` option) are
+/// honoured verbatim: they reserve their slot in the per-document set and are
+/// never renumbered, and generated slugs avoid them. Headings nested inside
+/// block components and slots are included.
+pub(crate) fn assign_heading_anchors(arena: &mut Arena, root: NodeRef, source: &str) {
+    // Pass 1: reserve every author-provided id so generated slugs avoid them.
+    let mut used: HashSet<String> = HashSet::new();
+    let mut headings: Vec<NodeRef> = Vec::new();
+    collect_headings(arena, root, &mut headings);
+    for &heading_ref in &headings {
+        if let Some(id) = arena[heading_ref]
+            .attributes()
+            .get("id")
+            .map(|v| v.str(source).to_string())
+        {
+            used.insert(id);
+        }
+    }
+
+    // Pass 2: generate slugs for headings without an author-provided id.
+    for &heading_ref in &headings {
+        if arena[heading_ref].attributes().get("id").is_some() {
+            continue;
+        }
+        let text = heading_text(arena, heading_ref, source);
+        let slug = crate::slug::slugify_unique(&text, &mut used);
+        arena[heading_ref]
+            .attributes_mut()
+            .insert("id", text::Value::from(slug));
+    }
+}
+
+/// Collect all `heading` node refs under `node_ref` in document order.
+fn collect_headings(arena: &Arena, node_ref: NodeRef, out: &mut Vec<NodeRef>) {
+    if matches!(arena[node_ref].kind_data(), KindData::Heading(_)) {
+        out.push(node_ref);
+    }
+    let mut child = arena[node_ref].first_child();
+    while let Some(child_ref) = child {
+        collect_headings(arena, child_ref, out);
+        child = arena[child_ref].next_sibling();
+    }
+}
+
+/// Concatenate the text content of a heading for slug generation.
+///
+/// Descendant `Text` and `RawHtml` nodes contribute their raw content; emoji
+/// extension nodes contribute their shortcode (e.g. `wave`) rather than the
+/// Unicode character, keeping anchors ASCII-friendly.
+fn heading_text(arena: &Arena, node_ref: NodeRef, source: &str) -> String {
+    let mut out = String::new();
+    collect_heading_text(arena, node_ref, source, &mut out);
+    out
+}
+
+/// Recursive helper for [`heading_text`].
+fn collect_heading_text(arena: &Arena, node_ref: NodeRef, source: &str, out: &mut String) {
+    match arena[node_ref].kind_data() {
+        KindData::Text(t) => out.push_str(t.str(source)),
+        KindData::RawHtml(h) => out.push_str(&h.str(source)),
+        KindData::Extension(ext) => {
+            if let Some(emoji) = (ext.as_ref() as &dyn std::any::Any).downcast_ref::<Emoji>()
+                && let Some(sc) = emoji.shortcode()
+            {
+                out.push_str(sc);
+            }
+        }
+        _ => {}
+    }
+
+    let mut child = arena[node_ref].first_child();
+    while let Some(child_ref) = child {
+        collect_heading_text(arena, child_ref, source, out);
+        child = arena[child_ref].next_sibling();
+    }
 }
 
 // ---------------------------------------------------------------------------
