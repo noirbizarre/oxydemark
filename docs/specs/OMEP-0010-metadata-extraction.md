@@ -94,9 +94,19 @@ Added to the surfaces frozen in OMEP-0008 (all additive):
 * `frontmatter: dict | None` -- typed YAML frontmatter, or `None` (see
   Frontmatter).
 
+On the **Rust** surface (PyO3-independent, see OMEP-0008), the signatures and
+frontmatter type differ from Python:
+
+* `parse_document(markdown: &str) -> ParseResult` -- no `Python` token, no
+  `PyResult` (parsing is infallible).
+* `ParseResult.frontmatter: Option<rushdown::ast::Meta>` -- the typed YAML
+  frontmatter as a native Rust `Meta` value, preserving native YAML types. The
+  Python binding converts this to a `dict` via a computed getter (using the
+  internal `meta_to_py` converter); Python callers see `dict | None` as above.
+
 `parse()` remains the tree-only fast path; `parse_document()` is the
 metadata-aware path. This mirrors the existing `parse()` vs
-`markdown_to_html()` split in `src/lib.rs`.
+`markdown_to_html()` split.
 
 ### Consequences
 

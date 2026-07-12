@@ -6,7 +6,9 @@
 
 use std::collections::HashMap;
 
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
+#[cfg(feature = "python")]
 use pyo3::types::{PyDict, PyList};
 use rushdown::as_kind_data;
 use rushdown::ast::{self, KindData, NodeRef, TextQualifier};
@@ -28,23 +30,22 @@ use crate::extensions::{BlockComponent, InlineComponent, Slot, SpanAttributes};
 ///     if node.kind == "text":
 ///         print(node.text)
 /// ```
-#[pyclass(from_py_object)]
+// `get_all`/`set_all` are applied on the `#[pyclass]` attribute (rather than a
+// per-field `#[pyo3(get, set)]`) because a field-level `#[pyo3(...)]` helper
+// attribute cannot be gated with `#[cfg_attr]` in PyO3 0.28.
+#[cfg_attr(feature = "python", pyclass(get_all, set_all, from_py_object))]
 #[derive(Clone, Debug)]
 pub struct AstNode {
     /// The node kind (e.g. "document", "paragraph", "text", "heading").
-    #[pyo3(get, set)]
     pub kind: String,
 
     /// Child nodes.
-    #[pyo3(get, set)]
     pub children: Vec<AstNode>,
 
     /// Text content for leaf nodes (e.g. "text", "code_span").
-    #[pyo3(get, set)]
     pub text: Option<String>,
 
     /// HTML attributes attached to this node.
-    #[pyo3(get, set)]
     pub attributes: HashMap<String, String>,
 
     /// YAML frontmatter metadata (only present on the "document" node).
@@ -55,27 +56,27 @@ pub struct AstNode {
     /// are lossy. It is retained for backward compatibility and will be removed
     /// in a pre-1.0 release. Use [`crate::parse_document`] and
     /// `ParseResult.frontmatter` for typed access.
-    #[pyo3(get, set)]
     pub metadata: Option<HashMap<String, String>>,
 }
 
-#[pymethods]
 impl AstNode {
     /// Create a new AST node.
-    #[new]
-    #[pyo3(signature = (kind, children=None, text=None, attributes=None, metadata=None))]
-    fn new(
+    ///
+    /// This is the pure-Rust constructor. The Python `AstNode(...)` constructor
+    /// (with keyword defaults) is defined in the `python`-gated `#[pymethods]`
+    /// block and delegates here.
+    pub fn new(
         kind: String,
-        children: Option<Vec<AstNode>>,
+        children: Vec<AstNode>,
         text: Option<String>,
-        attributes: Option<HashMap<String, String>>,
+        attributes: HashMap<String, String>,
         metadata: Option<HashMap<String, String>>,
     ) -> Self {
         AstNode {
             kind,
-            children: children.unwrap_or_default(),
+            children,
             text,
-            attributes: attributes.unwrap_or_default(),
+            attributes,
             metadata,
         }
     }
@@ -94,7 +95,17 @@ impl AstNode {
         result
     }
 
-    pub fn __repr__(&self) -> String {
+    fn walk_recursive(&self, result: &mut Vec<AstNode>) {
+        result.push(self.clone());
+        for child in &self.children {
+            child.walk_recursive(result);
+        }
+    }
+
+    /// Human-readable representation shared by the Python `__repr__` and the
+    /// crate's tests. Only compiled where it is actually used.
+    #[cfg(any(test, feature = "python"))]
+    pub(crate) fn repr_string(&self) -> String {
         if let Some(ref t) = self.text {
             format!("AstNode(kind={:?}, text={:?})", self.kind, t)
         } else {
@@ -107,12 +118,36 @@ impl AstNode {
     }
 }
 
+#[cfg(feature = "python")]
+#[pymethods]
 impl AstNode {
-    fn walk_recursive(&self, result: &mut Vec<AstNode>) {
-        result.push(self.clone());
-        for child in &self.children {
-            child.walk_recursive(result);
-        }
+    /// Create a new AST node (Python constructor).
+    #[new]
+    #[pyo3(signature = (kind, children=None, text=None, attributes=None, metadata=None))]
+    fn py_new(
+        kind: String,
+        children: Option<Vec<AstNode>>,
+        text: Option<String>,
+        attributes: Option<HashMap<String, String>>,
+        metadata: Option<HashMap<String, String>>,
+    ) -> Self {
+        AstNode::new(
+            kind,
+            children.unwrap_or_default(),
+            text,
+            attributes.unwrap_or_default(),
+            metadata,
+        )
+    }
+
+    /// Walk the AST tree depth-first, returning a flat list of all nodes.
+    #[pyo3(name = "walk")]
+    fn py_walk(&self) -> Vec<AstNode> {
+        self.walk()
+    }
+
+    fn __repr__(&self) -> String {
+        self.repr_string()
     }
 }
 
@@ -136,22 +171,56 @@ impl AstNode {
 /// result.frontmatter["count"]  # 5 (an int, not "5")
 /// result.root.kind             # "document"
 /// ```
-#[pyclass]
+#[cfg_attr(feature = "python", pyclass)]
 pub struct ParseResult {
     /// The parsed AST tree (identical to what [`crate::parse`] returns).
-    #[pyo3(get)]
+    ///
+    /// Exposed to Python via a computed getter (see the `python`-gated
+    /// `#[pymethods]` block) rather than a field-level `#[pyo3(get)]`, which
+    /// cannot be `#[cfg_attr]`-gated in PyO3 0.28.
     pub root: AstNode,
 
     /// Typed YAML frontmatter, or `None` when the document has no frontmatter.
     ///
-    /// Values preserve their native YAML types as native Python objects
-    /// (`str`, `int`, `float`, `bool`, `list`, `dict`, `None`).
-    #[pyo3(get)]
-    pub frontmatter: Option<Py<PyDict>>,
+    /// On the pure-Rust surface this is a [`rushdown::ast::Meta`] mapping,
+    /// preserving native YAML types. The Python binding exposes it as a `dict`
+    /// via a computed getter (see the `python`-gated `#[pymethods]` block),
+    /// where values become native Python objects (`str`, `int`, `float`,
+    /// `bool`, `list`, `dict`, `None`).
+    pub frontmatter: Option<ast::Meta>,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl ParseResult {
+    /// The parsed AST tree.
+    #[getter]
+    fn root(&self) -> AstNode {
+        self.root.clone()
+    }
+
+    /// Typed YAML frontmatter as a Python `dict`, or `None`.
+    #[getter]
+    fn frontmatter(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
+        match &self.frontmatter {
+            None => Ok(None),
+            Some(ast::Meta::Mapping(map)) => {
+                let dict = PyDict::new(py);
+                for (k, v) in map.iter() {
+                    dict.set_item(k, meta_to_py(py, v)?)?;
+                }
+                Ok(Some(dict.unbind()))
+            }
+            // Document frontmatter is always a mapping; be defensive for any
+            // other shape rather than panicking.
+            Some(other) => {
+                let dict = PyDict::new(py);
+                dict.set_item("value", meta_to_py(py, other)?)?;
+                Ok(Some(dict.unbind()))
+            }
+        }
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "ParseResult(root={:?}, frontmatter={})",
@@ -180,6 +249,7 @@ impl ParseResult {
 ///
 /// This converter is intentionally standalone so it can be reused for the
 /// typed component `props` representation (OMEP-0007) in a later change.
+#[cfg(feature = "python")]
 pub(crate) fn meta_to_py(py: Python<'_>, meta: &ast::Meta) -> PyResult<Py<PyAny>> {
     let value: Py<PyAny> = match meta {
         ast::Meta::Null => py.None(),
@@ -205,29 +275,23 @@ pub(crate) fn meta_to_py(py: Python<'_>, meta: &ast::Meta) -> PyResult<Py<PyAny>
     Ok(value)
 }
 
-/// Build the typed frontmatter mapping for a document node.
+/// Build the typed frontmatter for a document node as a pure-Rust
+/// [`ast::Meta`] mapping.
 ///
-/// Returns `None` when the document carries no frontmatter (an empty metadata
-/// map), otherwise a `dict` of top-level keys to typed values, preserving the
-/// frontmatter's insertion order.
-pub(crate) fn document_frontmatter(
-    py: Python<'_>,
-    arena: &ast::Arena,
-    document_ref: NodeRef,
-) -> PyResult<Option<Py<PyDict>>> {
+/// Returns `None` when the node is not a document or carries no frontmatter (an
+/// empty metadata map), otherwise a [`ast::Meta::Mapping`] of top-level keys to
+/// typed values, preserving the frontmatter's insertion order. The Python
+/// binding converts this to a `dict` via [`meta_to_py`].
+pub(crate) fn document_meta(arena: &ast::Arena, document_ref: NodeRef) -> Option<ast::Meta> {
     let node = &arena[document_ref];
     if !matches!(node.kind_data(), KindData::Document(_)) {
-        return Ok(None);
+        return None;
     }
     let meta = as_kind_data!(arena, document_ref, Document).metadata();
     if meta.is_empty() {
-        return Ok(None);
+        return None;
     }
-    let dict = PyDict::new(py);
-    for (k, v) in meta.iter() {
-        dict.set_item(k, meta_to_py(py, v)?)?;
-    }
-    Ok(Some(dict.unbind()))
+    Some(ast::Meta::Mapping(meta.clone()))
 }
 
 // ---------------------------------------------------------------------------
@@ -482,7 +546,7 @@ pub(crate) fn extract_summary_blocks(
     None
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "python"))]
 mod tests {
     use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 
@@ -524,7 +588,7 @@ mod tests {
             let obj = meta_to_py(py, &seq).unwrap();
             let list = obj.bind(py);
             assert!(list.is_instance_of::<PyList>());
-            let list = list.downcast::<PyList>().unwrap();
+            let list = list.cast::<PyList>().unwrap();
             assert_eq!(list.len(), 2);
             assert_eq!(list.get_item(0).unwrap().extract::<i64>().unwrap(), 1);
             assert_eq!(
@@ -546,10 +610,10 @@ mod tests {
             let obj = meta_to_py(py, &Meta::Mapping(outer)).unwrap();
             let dict = obj.bind(py);
             assert!(dict.is_instance_of::<PyDict>());
-            let dict = dict.downcast::<PyDict>().unwrap();
+            let dict = dict.cast::<PyDict>().unwrap();
 
             let author = dict.get_item("author").unwrap().unwrap();
-            let author = author.downcast::<PyDict>().unwrap();
+            let author = author.cast::<PyDict>().unwrap();
             assert_eq!(
                 author
                     .get_item("name")

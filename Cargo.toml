@@ -13,14 +13,28 @@ categories = ["text-processing", "parser-implementations"]
 name = "oxydemark"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# No default features: a plain `cargo build` and downstream `oxydemark = "..."`
+# dependency is 100% PyO3-free (issue #20).
+default = []
+# Builds the PyO3 binding layer (`#[pyclass]`/`#[pyfunction]`/`#[pymodule]`).
+# This alone links against libpython, so `cargo test --features python` works
+# with the `auto-initialize` dev-dependency.
+python = ["dep:pyo3"]
+# Adds `extension-module` linkage on top of `python` for building the wheel.
+# maturin activates this feature (see `pyproject.toml`); it must NOT be used
+# for `cargo test` because the test harness needs to link libpython itself.
+extension-module = ["python", "pyo3/extension-module"]
+
 [dependencies]
-pyo3 = "0.28"
+pyo3 = { version = "0.28", optional = true }
 rushdown = "0.11"
 rushdown-meta = "0.9"
 rushdown-emoji = "0.9"
 unicode-normalization = "0.1"
 
 [dev-dependencies]
-# Enable the embedded Python interpreter so `#[cfg(test)]` tests that touch the
-# PyO3 API (e.g. `meta_to_py`) can run under `cargo test` / `cargo nextest`.
+# Enable the embedded Python interpreter so the feature-gated `#[cfg(test)]`
+# tests that touch the PyO3 API (e.g. `meta_to_py`) can run under
+# `cargo test --features python` / `cargo nextest run --features python`.
 pyo3 = { version = "0.28", features = ["auto-initialize"] }

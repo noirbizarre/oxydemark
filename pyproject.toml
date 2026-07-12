@@ -36,7 +36,10 @@ typing = ["ty>=0.0.58"]
 bench = ["pytest>=9", "pytest-benchmark>=5", "markdown-it-py>=3", "markdown>=3"]
 
 [tool.maturin]
-features = ["pyo3/extension-module"]
+# Activate the crate's `extension-module` feature, which enables the optional
+# `pyo3` dependency, the binding layer, and `pyo3/extension-module` linkage for
+# the wheel build (issue #20).
+features = ["extension-module"]
 python-source = "python"
 module-name = "oxydemark._core"
 # Explicitly guarantee the PEP 561 marker and the hand-written stub are packaged

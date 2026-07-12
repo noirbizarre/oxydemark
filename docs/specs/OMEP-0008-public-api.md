@@ -68,16 +68,21 @@ ecosystems stay in lockstep, and it states unambiguously what 1.0 will mean.
 
 The following items constitute the supported Rust surface and are to be
 re-exported from the crate root (`oxydemark::*`). Everything else in the crate
-(the `extensions`, `html_render`, and `ast` internal helpers, the thread-local
-parser/renderer caches, and the arena-conversion functions) is **private** and
-may change without notice.
+(the `api` internals, the `extensions`, `html_render`, and `ast` internal
+helpers, the thread-local parser/renderer caches, and the arena-conversion
+functions) is **private** and may change without notice.
 
 | Item | Kind | Description |
 | ---- | ---- | ----------- |
-| `parse(markdown: &str) -> PyResult<AstNode>` | function | Parse Markdown into an `AstNode` tree. |
+| `parse(markdown: &str) -> AstNode` | function | Parse Markdown into an `AstNode` tree (infallible). |
 | `render_ast(node: &AstNode) -> String` | function | Render an `AstNode` tree to HTML. |
-| `markdown_to_html(markdown: &str) -> PyResult<String>` | function | Convert Markdown to HTML in one pass (fast path). |
-| `AstNode` | struct | Tree-based AST node (`kind`, `children`, `text`, `attributes`, `metadata`) with `new()`, `walk()`, and `__repr__()`. |
+| `markdown_to_html(markdown: &str) -> Result<String, OxydeError>` | function | Convert Markdown to HTML in one pass (fast path). |
+| `AstNode` | struct | Tree-based AST node (`kind`, `children`, `text`, `attributes`, `metadata`) with `new()` and `walk()`. |
+| `OxydeError` | enum | First-class, PyO3-independent error type for the Rust surface. |
+
+The metadata-aware surface (`parse_document`, `ParseResult`, `slugify`,
+`extract_summary`) is defined additively in
+[OMEP-0010](OMEP-0010-metadata-extraction.md).
 
 Notes and constraints on the Rust surface:
 
@@ -91,9 +96,29 @@ Notes and constraints on the Rust surface:
   `"inline_component"`, `"span_attributes"`, `"softbreak"`, `"hardbreak"`) are
   part of the contract: existing kinds will not be renamed within a minor
   series once 1.0 is reached. New kinds may be added.
-* `PyResult` is exposed because the primary consumer is the Python binding; a
-  future pure-Rust error type is explicitly out of scope for this OMEP and
-  tracked as a follow-up.
+* The Rust surface is **PyO3-independent**: PyO3 is an optional dependency
+  behind the non-default `python` cargo feature and is never required by Rust
+  consumers (see "Feature gating" below). Fallible operations return a
+  first-class [`OxydeError`]; `parse` is infallible. This supersedes the
+  earlier decision to leak `PyResult` on the Rust surface, which was tracked as
+  a 1.0 follow-up and has now been pulled forward.
+
+### Feature gating
+
+The crate is `cdylib + rlib`. All PyO3 bindings (`#[pyclass]`, `#[pyfunction]`,
+`#[pymodule]`) live behind cargo features so downstream Rust crates never pull
+in PyO3:
+
+* `python` -- enables the optional `pyo3` dependency and the binding layer
+  (`src/python.rs`, the `oxydemark._core` module). Safe for
+  `cargo test --features python` because it links libpython.
+* `extension-module` -- adds `pyo3/extension-module` on top of `python` for
+  building the wheel. maturin activates this feature
+  (`[tool.maturin] features = ["extension-module"]`); it must **not** be used
+  for `cargo test`.
+* No default features: a plain `cargo build` and downstream `oxydemark = "..."`
+  dependency are 100% PyO3-free. `tests/public_api.rs` exercises the whole
+  public surface without any feature to prove this.
 
 ### Public Python surface
 
@@ -154,8 +179,9 @@ Criteria for cutting **1.0** (all must hold):
 
 1. The Rust and Python surfaces above have been stable across at least two
    consecutive minor releases with no breaking changes.
-2. A dedicated, first-class Rust error type replaces the leaked `PyResult` on
-   the Rust surface (the follow-up noted above).
+2. ~~A dedicated, first-class Rust error type replaces the leaked `PyResult` on
+   the Rust surface (the follow-up noted above).~~ **Done** (pulled forward):
+   the Rust surface uses [`OxydeError`] and PyO3 is optional behind a feature.
 3. `AstNode.kind` values and node structure are documented and covered by tests
    asserting the contract.
 4. `py.typed` + `_core.pyi` pass a type-check gate in CI (e.g. mypy/pyright).
@@ -173,8 +199,9 @@ Once 1.0 is reached, standard SemVer applies: breaking changes bump MAJOR.
   keeping the two ecosystems consistent.
 * Bad, because a hand-written `_core.pyi` stub must be kept in sync with the
   Rust `#[pymethods]`; drift is possible until an automated check exists.
-* Bad, because leaking `PyResult` on the Rust surface is a wart we now owe a 1.0
-  follow-up to remove.
+* Good, because the Rust surface is PyO3-independent (`OxydeError` + optional
+  `python` feature), so downstream Rust crates (OxydePress) can depend on the
+  `rlib` without pulling in Python.
 * Neutral, because lockstep versioning couples crate and package releases; this
   is simpler to reason about but occasionally forces a no-op bump on one side.
 
@@ -222,7 +249,9 @@ Once 1.0 is reached, standard SemVer applies: breaking changes bump MAJOR.
   (Conventional Commits / changelog), [OMEP-0007](OMEP-0007-comark-syntax.md)
   (extended syntax whose node kinds appear on the AST surface).
 * Follow-up actions:
-  * Add `python/oxydemark/py.typed` and `python/oxydemark/_core.pyi`.
-  * Re-export the public items from the crate root in `src/lib.rs`.
-  * Introduce a first-class Rust error type before 1.0.
+  * ~~Add `python/oxydemark/py.typed` and `python/oxydemark/_core.pyi`.~~ Done.
+  * ~~Re-export the public items from the crate root in `src/lib.rs`.~~ Done
+    (issue #20).
+  * ~~Introduce a first-class Rust error type before 1.0.~~ Done (`OxydeError`,
+    issue #20).
   * Add a type-check gate to CI.
