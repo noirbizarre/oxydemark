@@ -120,3 +120,4 @@ Links, references, follow-up actions.
 | [0007](OMEP-0007-comark-syntax.md) | Extended Syntax -- Comark Specification | accepted |
 | [0008](OMEP-0008-public-api.md) | Public API Stability & Versioning Policy | accepted |
 | [0009](OMEP-0009-publishing.md) | Publishing & Distribution (crates.io + PyPI) | proposed |
+| [0010](OMEP-0010-metadata-extraction.md) | Structured metadata extraction (TOC / anchors / summary) | proposed |
