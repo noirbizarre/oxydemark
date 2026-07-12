@@ -23,6 +23,10 @@ run = "uv run --group test pytest"
 description = "Run both Rust and Python test suites"
 depends = ["test", "test:python"]
 
+[tasks.typecheck]
+description = "Type-check the Python package with ty"
+run = "uv run --group typing ty check"
+
 [tasks.lint]
 description = "Run clippy lints"
 run = "cargo clippy -- -D warnings"
@@ -45,7 +49,7 @@ run = "git cliff --unreleased"
 
 [tasks.ci]
 description = "Run all CI checks locally"
-depends = ["fmt:check", "lint", "test"]
+depends = ["fmt:check", "lint", "test", "test:python", "typecheck"]
 
 [tasks.setup]
 description = "Install pre-commit hooks via prek"

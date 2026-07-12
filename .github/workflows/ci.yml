@@ -92,6 +92,16 @@ jobs:
           pip install target/wheels/*.whl
           python -c "import oxydemark; print(oxydemark.markdown_to_html('hello'))"
 
+      - name: Run Python tests
+        run: |
+          pip install pytest
+          pytest -q
+
+      - name: Type-check public API (ty)
+        run: |
+          pip install ty
+          ty check --python "$(python -c 'import sys; print(sys.prefix)')"
+
   changelog:
     name: Changelog
     runs-on: ubuntu-latest

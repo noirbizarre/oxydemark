@@ -7,8 +7,17 @@ updated together with a breaking-change version bump (see the semver policy).
 from __future__ import annotations
 
 import importlib
+import os
 
 import oxydemark
+
+
+def _package_dir() -> str:
+    """Return the on-disk directory of the installed ``oxydemark`` package."""
+    spec = importlib.util.find_spec("oxydemark")
+    assert spec is not None
+    assert spec.submodule_search_locations is not None
+    return spec.submodule_search_locations[0]
 
 # The frozen public Python surface, per OMEP-0008, extended additively by
 # OMEP-0010 (slugify, extract_summary, parse_document, ParseResult).
@@ -46,12 +55,15 @@ def test_all_has_no_duplicates():
 
 def test_package_ships_py_typed_marker():
     """OMEP-0008 mandates a PEP 561 py.typed marker for the package."""
-    spec = importlib.util.find_spec("oxydemark")
-    assert spec is not None
-    assert spec.submodule_search_locations is not None
-    package_dir = spec.submodule_search_locations[0]
-    import os
-
+    package_dir = _package_dir()
     assert os.path.exists(os.path.join(package_dir, "py.typed")), (
         "py.typed marker missing; required by OMEP-0008 typing strategy"
+    )
+
+
+def test_package_ships_core_stub():
+    """OMEP-0008 mandates a hand-written _core.pyi stub shipped with the package."""
+    package_dir = _package_dir()
+    assert os.path.exists(os.path.join(package_dir, "_core.pyi")), (
+        "_core.pyi stub missing; required by OMEP-0008 typing strategy"
     )
