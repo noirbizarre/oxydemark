@@ -42,3 +42,14 @@ def render_ast(node: AstNode) -> str:
 def markdown_to_html(markdown: str) -> str:
     """Convert Markdown directly to HTML (fast path, no AST exposure)."""
     ...
+
+def slugify(text: str, existing: list[str] | None = None) -> str:
+    """Generate a URL-friendly anchor slug from ``text`` (OMEP-0010)."""
+    ...
+
+def extract_summary(markdown: str) -> str | None:
+    """Extract the rendered-HTML summary before a top-level ``<!-- more -->`` delimiter.
+
+    Returns ``None`` when the document has no top-level delimiter.
+    """
+    ...

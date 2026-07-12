@@ -12,7 +12,10 @@ use std::fmt;
 
 use std::collections::HashSet;
 
-use rushdown::ast::{self, Arena, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, pp_indent};
+use rushdown::as_type_data;
+use rushdown::ast::{
+    self, Arena, BlockText, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, pp_indent,
+};
 use rushdown::parser::{
     self, BlockParser, Context, InlineParser, NoParserOptions, Parser, ParserExtension, State,
 };
@@ -832,6 +835,51 @@ fn collect_heading_text(arena: &Arena, node_ref: NodeRef, source: &str, out: &mu
         collect_heading_text(arena, child_ref, source, out);
         child = arena[child_ref].next_sibling();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Summary / excerpt delimiter (`<!-- more -->`)
+// ---------------------------------------------------------------------------
+
+/// Determine whether an arena node is a `<!-- more -->` summary delimiter.
+///
+/// Per OMEP-0010, the delimiter is an HTML comment whose trimmed body is exactly
+/// `more`. Matching is case-insensitive and tolerant of internal whitespace, so
+/// `<!-- more -->`, `<!--more-->`, and `<!--   MORE   -->` all match. Both the
+/// block form (`HtmlBlock`, its own line) and an inline `RawHtml` comment are
+/// recognised; the block form is the idiomatic case and its raw text is read
+/// directly from the arena because it is not surfaced through `str(source)`.
+pub(crate) fn is_more_marker(arena: &Arena, node_ref: NodeRef, source: &str) -> bool {
+    let raw = match arena[node_ref].kind_data() {
+        KindData::HtmlBlock(block) => match block.value() {
+            BlockText::Source => {
+                let mut text = String::new();
+                for line in as_type_data!(arena, node_ref, Block).source().iter() {
+                    text.push_str(&line.str(source));
+                }
+                text
+            }
+            BlockText::Owned(value) => value.clone(),
+        },
+        KindData::RawHtml(html) => html.str(source).to_string(),
+        _ => return false,
+    };
+
+    is_more_comment(&raw)
+}
+
+/// Check whether `raw` is exactly an HTML comment whose body is `more`.
+///
+/// Case-insensitive and whitespace-tolerant, per OMEP-0010.
+fn is_more_comment(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    let Some(inner) = trimmed
+        .strip_prefix("<!--")
+        .and_then(|s| s.strip_suffix("-->"))
+    else {
+        return false;
+    };
+    inner.trim().eq_ignore_ascii_case("more")
 }
 
 // ---------------------------------------------------------------------------

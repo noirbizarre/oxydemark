@@ -622,3 +622,45 @@ class TestSpanAttributes:
         ast = oxydemark.parse("[highlighted]{.mark}")
         html = oxydemark.render_ast(ast)
         assert "<span" in html
+
+
+class TestSummary:
+    """Tests for the public extract_summary() function (OMEP-0010)."""
+
+    def test_splits_at_delimiter(self):
+        src = "Intro paragraph shown in listings.\n\n<!-- more -->\n\nThe rest."
+        summary = oxydemark.extract_summary(src)
+        assert summary is not None
+        assert "<p>Intro paragraph shown in listings.</p>" in summary
+        assert "The rest" not in summary
+
+    def test_none_without_delimiter(self):
+        assert oxydemark.extract_summary("Just a plain paragraph.") is None
+
+    def test_whitespace_and_case_tolerant(self):
+        for delimiter in ("<!--more-->", "<!--   MORE   -->", "<!-- More -->"):
+            summary = oxydemark.extract_summary(f"Intro.\n\n{delimiter}\n\nBody.")
+            assert summary is not None
+            assert "<p>Intro.</p>" in summary
+            assert "Body" not in summary
+
+    def test_ignores_nested_delimiter(self):
+        src = "> Intro.\n>\n> <!-- more -->\n\nBody."
+        assert oxydemark.extract_summary(src) is None
+
+    def test_uses_first_top_level_delimiter(self):
+        src = "First.\n\n<!-- more -->\n\nSecond.\n\n<!-- more -->\n\nThird."
+        summary = oxydemark.extract_summary(src)
+        assert summary is not None
+        assert "<p>First.</p>" in summary
+        assert "Second" not in summary
+        assert "Third" not in summary
+
+    def test_matches_render_ast_prefix(self):
+        src = "# Heading\n\nIntro.\n\n<!-- more -->\n\nBody."
+        summary = oxydemark.extract_summary(src)
+        expected = oxydemark.render_ast(oxydemark.parse("# Heading\n\nIntro."))
+        assert summary == expected
+
+    def test_empty_when_delimiter_is_first_block(self):
+        assert oxydemark.extract_summary("<!-- more -->\n\nBody.") == ""

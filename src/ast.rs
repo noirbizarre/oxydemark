@@ -334,3 +334,28 @@ pub(crate) fn arena_to_ast_node(arena: &ast::Arena, node_ref: NodeRef, source: &
         metadata,
     }
 }
+
+/// Collect the top-level blocks that precede a `<!-- more -->` summary delimiter.
+///
+/// Only direct children of the `document` node are considered, and only the
+/// **first** such delimiter is significant (per OMEP-0010); delimiters nested
+/// inside other blocks are ignored. Returns the `AstNode`s appearing *before*
+/// the delimiter when one is present, or `None` when the document has no
+/// top-level delimiter. The returned vector may be empty when the delimiter is
+/// itself the first top-level block.
+pub(crate) fn extract_summary_blocks(
+    arena: &ast::Arena,
+    document_ref: NodeRef,
+    source: &str,
+) -> Option<Vec<AstNode>> {
+    let mut before = Vec::new();
+    let mut child = arena[document_ref].first_child();
+    while let Some(child_ref) = child {
+        if crate::extensions::is_more_marker(arena, child_ref, source) {
+            return Some(before);
+        }
+        before.push(arena_to_ast_node(arena, child_ref, source));
+        child = arena[child_ref].next_sibling();
+    }
+    None
+}

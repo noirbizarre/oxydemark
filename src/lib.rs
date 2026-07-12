@@ -158,6 +158,37 @@ fn slugify(text: &str, existing: Option<Vec<String>>) -> String {
     }
 }
 
+/// Extract the summary (excerpt) preceding a `<!-- more -->` delimiter.
+///
+/// Implements the OMEP-0010 summary algorithm: the summary is the rendered HTML
+/// of every top-level block that appears before the first `<!-- more -->`
+/// delimiter that is a direct child of the document. The delimiter comment is
+/// matched case-insensitively and tolerant of internal whitespace
+/// (`<!-- more -->`, `<!--more-->`, `<!--   MORE   -->`); delimiters nested
+/// inside other blocks are ignored.
+///
+/// Returns the rendered HTML when a delimiter is present (an empty string when
+/// no block precedes it), or `None` when the document has no top-level
+/// delimiter. The HTML is produced by the same renderer as [`render_ast`], so
+/// summary and full-body markup stay consistent.
+#[pyfunction]
+fn extract_summary(markdown: &str) -> Option<String> {
+    with_parser(|parser| {
+        let mut reader = text::BasicReader::new(markdown);
+        let (mut arena, document_ref) = parser.parse(&mut reader);
+        assign_heading_anchors(&mut arena, document_ref, markdown);
+        let blocks = ast::extract_summary_blocks(&arena, document_ref, markdown)?;
+        let summary_doc = AstNode {
+            kind: "document".to_string(),
+            children: blocks,
+            text: None,
+            attributes: std::collections::HashMap::new(),
+            metadata: None,
+        };
+        Some(render_ast_to_html(&summary_doc))
+    })
+}
+
 /// The native Python module implemented in Rust.
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -166,6 +197,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(render_ast, m)?)?;
     m.add_function(wrap_pyfunction!(markdown_to_html, m)?)?;
     m.add_function(wrap_pyfunction!(slugify, m)?)?;
+    m.add_function(wrap_pyfunction!(extract_summary, m)?)?;
     Ok(())
 }
 
@@ -1343,5 +1375,71 @@ mod tests {
             slugify("Overview", Some(vec!["overview".to_string()])),
             "overview-1"
         );
+    }
+
+    // -- Summary / excerpt extraction (`<!-- more -->`) --------------------
+
+    #[test]
+    fn summary_splits_at_block_delimiter() {
+        let summary =
+            extract_summary("Intro paragraph shown in listings.\n\n<!-- more -->\n\nThe rest.")
+                .expect("delimiter present");
+        assert!(
+            summary.contains("<p>Intro paragraph shown in listings.</p>"),
+            "summary should contain the intro, got: {summary}"
+        );
+        assert!(
+            !summary.contains("The rest"),
+            "summary must not contain body content, got: {summary}"
+        );
+    }
+
+    #[test]
+    fn summary_absent_without_delimiter() {
+        assert!(extract_summary("Just a plain paragraph.").is_none());
+    }
+
+    #[test]
+    fn summary_delimiter_whitespace_and_case_tolerant() {
+        for delimiter in ["<!--more-->", "<!--   MORE   -->", "<!-- More -->"] {
+            let src = format!("Intro.\n\n{delimiter}\n\nBody.");
+            let summary = extract_summary(&src)
+                .unwrap_or_else(|| panic!("delimiter {delimiter} should be detected"));
+            assert!(summary.contains("<p>Intro.</p>"), "got: {summary}");
+            assert!(!summary.contains("Body"), "got: {summary}");
+        }
+    }
+
+    #[test]
+    fn summary_ignores_nested_delimiter() {
+        // A delimiter nested inside a blockquote is not a top-level child.
+        assert!(extract_summary("> Intro.\n>\n> <!-- more -->\n\nBody.").is_none());
+    }
+
+    #[test]
+    fn summary_uses_first_top_level_delimiter() {
+        let summary =
+            extract_summary("First.\n\n<!-- more -->\n\nSecond.\n\n<!-- more -->\n\nThird.")
+                .expect("delimiter present");
+        assert!(summary.contains("<p>First.</p>"), "got: {summary}");
+        assert!(!summary.contains("Second"), "got: {summary}");
+        assert!(!summary.contains("Third"), "got: {summary}");
+    }
+
+    #[test]
+    fn summary_matches_render_ast_prefix() {
+        let src = "# Heading\n\nIntro.\n\n<!-- more -->\n\nBody.";
+        let summary = extract_summary(src).expect("delimiter present");
+        // The summary of the blocks before the delimiter must be rendered by the
+        // same renderer as render_ast: render the same prefix and compare.
+        let prefix_ast = parse("# Heading\n\nIntro.").unwrap();
+        let expected = render_ast_to_html(&prefix_ast);
+        assert_eq!(summary, expected);
+    }
+
+    #[test]
+    fn summary_empty_when_delimiter_is_first_block() {
+        let summary = extract_summary("<!-- more -->\n\nBody.").expect("delimiter present");
+        assert_eq!(summary, "");
     }
 }
