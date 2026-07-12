@@ -11,15 +11,17 @@ import importlib
 import oxydemark
 
 # The frozen public Python surface, per OMEP-0008, extended additively by
-# OMEP-0010 (slugify, extract_summary).
+# OMEP-0010 (slugify, extract_summary, parse_document, ParseResult).
 PUBLIC_SURFACE = frozenset(
     {
         "AstNode",
         "OxydeEngine",
+        "ParseResult",
         "Plugin",
         "extract_summary",
         "markdown_to_html",
         "parse",
+        "parse_document",
         "render_ast",
         "slugify",
     }

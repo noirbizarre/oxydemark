@@ -135,6 +135,70 @@ class TestParse:
 
 
 # ---------------------------------------------------------------------------
+# parse_document / ParseResult (OMEP-0010)
+# ---------------------------------------------------------------------------
+
+
+class TestParseDocument:
+    """Tests for the typed frontmatter accessor on the parse result."""
+
+    def test_no_frontmatter(self):
+        result = oxydemark.parse_document("Just text")
+        assert result.frontmatter is None
+
+    def test_root_is_document(self):
+        result = oxydemark.parse_document("---\ntitle: Hi\n---\n\nBody")
+        assert result.root.kind == "document"
+        # The tree is reachable and equivalent to parse().
+        kinds = [c.kind for c in result.root.children]
+        assert "paragraph" in kinds
+
+    def test_string_value(self):
+        result = oxydemark.parse_document("---\ntitle: Hello\n---\n\nContent")
+        assert result.frontmatter is not None
+        assert result.frontmatter["title"] == "Hello"
+        assert isinstance(result.frontmatter["title"], str)
+
+    def test_int_value_preserves_type(self):
+        result = oxydemark.parse_document("---\ncount: 5\n---\n\nContent")
+        assert result.frontmatter["count"] == 5
+        assert isinstance(result.frontmatter["count"], int)
+        assert not isinstance(result.frontmatter["count"], bool)
+
+    def test_float_value_preserves_type(self):
+        result = oxydemark.parse_document("---\nratio: 1.5\n---\n\nContent")
+        assert result.frontmatter["ratio"] == 1.5
+        assert isinstance(result.frontmatter["ratio"], float)
+
+    def test_bool_value_preserves_type(self):
+        result = oxydemark.parse_document("---\ndraft: true\n---\n\nContent")
+        assert result.frontmatter["draft"] is True
+
+    def test_null_value(self):
+        result = oxydemark.parse_document("---\nsubtitle: null\n---\n\nContent")
+        assert result.frontmatter["subtitle"] is None
+
+    def test_list_value(self):
+        md = "---\ntags:\n  - a\n  - b\n---\n\nContent"
+        result = oxydemark.parse_document(md)
+        assert result.frontmatter["tags"] == ["a", "b"]
+
+    def test_nested_mapping(self):
+        md = "---\nauthor:\n  name: Ada\n  age: 36\n---\n\nContent"
+        result = oxydemark.parse_document(md)
+        author = result.frontmatter["author"]
+        assert author == {"name": "Ada", "age": 36}
+        assert isinstance(author["age"], int)
+
+    def test_multiple_keys_preserve_order(self):
+        md = "---\ntitle: Hello\ncount: 3\ndraft: false\n---\n\nContent"
+        result = oxydemark.parse_document(md)
+        assert list(result.frontmatter.keys()) == ["title", "count", "draft"]
+        assert result.frontmatter["count"] == 3
+        assert result.frontmatter["draft"] is False
+
+
+# ---------------------------------------------------------------------------
 # AstNode
 # ---------------------------------------------------------------------------
 

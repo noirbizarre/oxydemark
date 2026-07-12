@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyList};
 use rushdown::as_kind_data;
 use rushdown::ast::{self, KindData, NodeRef, TextQualifier};
 use rushdown_emoji::Emoji;
@@ -47,6 +48,13 @@ pub struct AstNode {
     pub attributes: HashMap<String, String>,
 
     /// YAML frontmatter metadata (only present on the "document" node).
+    ///
+    /// **Deprecated** in favour of [`ParseResult::frontmatter`] (see
+    /// OMEP-0010). This map is stringly-typed: every YAML value is coerced to a
+    /// string, so non-string values (numbers, booleans, sequences, mappings)
+    /// are lossy. It is retained for backward compatibility and will be removed
+    /// in a pre-1.0 release. Use [`crate::parse_document`] and
+    /// `ParseResult.frontmatter` for typed access.
     #[pyo3(get, set)]
     pub metadata: Option<HashMap<String, String>>,
 }
@@ -106,6 +114,120 @@ impl AstNode {
             child.walk_recursive(result);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// ParseResult (OMEP-0010)
+// ---------------------------------------------------------------------------
+
+/// The result of [`crate::parse_document`]: the AST tree plus structured,
+/// typed document metadata.
+///
+/// This is the metadata-aware counterpart to [`crate::parse`]. It bundles the
+/// same `AstNode` tree (reachable via [`ParseResult::root`]) with typed YAML
+/// frontmatter, superseding the lossy stringly-typed [`AstNode::metadata`].
+///
+/// # Examples
+///
+/// From Python:
+/// ```python
+/// result = oxydemark.parse_document("---\ntitle: Hi\ncount: 5\n---\nBody")
+/// result.frontmatter["title"]  # "Hi"
+/// result.frontmatter["count"]  # 5 (an int, not "5")
+/// result.root.kind             # "document"
+/// ```
+#[pyclass]
+pub struct ParseResult {
+    /// The parsed AST tree (identical to what [`crate::parse`] returns).
+    #[pyo3(get)]
+    pub root: AstNode,
+
+    /// Typed YAML frontmatter, or `None` when the document has no frontmatter.
+    ///
+    /// Values preserve their native YAML types as native Python objects
+    /// (`str`, `int`, `float`, `bool`, `list`, `dict`, `None`).
+    #[pyo3(get)]
+    pub frontmatter: Option<Py<PyDict>>,
+}
+
+#[pymethods]
+impl ParseResult {
+    fn __repr__(&self) -> String {
+        format!(
+            "ParseResult(root={:?}, frontmatter={})",
+            self.root.kind,
+            if self.frontmatter.is_some() {
+                "{...}"
+            } else {
+                "None"
+            }
+        )
+    }
+}
+
+/// Recursively convert a rushdown [`ast::Meta`] value into a native Python
+/// object.
+///
+/// Each YAML value keeps its native type:
+///
+/// * `Null` -> `None`
+/// * `Bool` -> `bool`
+/// * `Int` -> `int`
+/// * `Float` -> `float`
+/// * `String` -> `str`
+/// * `Sequence` -> `list` (elements converted recursively)
+/// * `Mapping` -> `dict` (values converted recursively; keys are `str`)
+///
+/// This converter is intentionally standalone so it can be reused for the
+/// typed component `props` representation (OMEP-0007) in a later change.
+pub(crate) fn meta_to_py(py: Python<'_>, meta: &ast::Meta) -> PyResult<Py<PyAny>> {
+    let value: Py<PyAny> = match meta {
+        ast::Meta::Null => py.None(),
+        ast::Meta::Bool(b) => b.into_pyobject(py)?.to_owned().into_any().unbind(),
+        ast::Meta::Int(i) => i.into_pyobject(py)?.into_any().unbind(),
+        ast::Meta::Float(f) => f.into_pyobject(py)?.into_any().unbind(),
+        ast::Meta::String(s) => s.into_pyobject(py)?.into_any().unbind(),
+        ast::Meta::Sequence(items) => {
+            let list = PyList::empty(py);
+            for item in items {
+                list.append(meta_to_py(py, item)?)?;
+            }
+            list.into_any().unbind()
+        }
+        ast::Meta::Mapping(map) => {
+            let dict = PyDict::new(py);
+            for (k, v) in map.iter() {
+                dict.set_item(k, meta_to_py(py, v)?)?;
+            }
+            dict.into_any().unbind()
+        }
+    };
+    Ok(value)
+}
+
+/// Build the typed frontmatter mapping for a document node.
+///
+/// Returns `None` when the document carries no frontmatter (an empty metadata
+/// map), otherwise a `dict` of top-level keys to typed values, preserving the
+/// frontmatter's insertion order.
+pub(crate) fn document_frontmatter(
+    py: Python<'_>,
+    arena: &ast::Arena,
+    document_ref: NodeRef,
+) -> PyResult<Option<Py<PyDict>>> {
+    let node = &arena[document_ref];
+    if !matches!(node.kind_data(), KindData::Document(_)) {
+        return Ok(None);
+    }
+    let meta = as_kind_data!(arena, document_ref, Document).metadata();
+    if meta.is_empty() {
+        return Ok(None);
+    }
+    let dict = PyDict::new(py);
+    for (k, v) in meta.iter() {
+        dict.set_item(k, meta_to_py(py, v)?)?;
+    }
+    Ok(Some(dict.unbind()))
 }
 
 // ---------------------------------------------------------------------------
@@ -358,4 +480,94 @@ pub(crate) fn extract_summary_blocks(
         child = arena[child_ref].next_sibling();
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
+
+    use super::*;
+    use rushdown::ast::Meta;
+    use rushdown::util::StringMap;
+
+    #[test]
+    fn meta_to_py_scalars_preserve_native_types() {
+        Python::attach(|py| {
+            assert!(meta_to_py(py, &Meta::Null).unwrap().is_none(py));
+
+            let b = meta_to_py(py, &Meta::Bool(true)).unwrap();
+            let b = b.bind(py);
+            assert!(b.is_instance_of::<PyBool>());
+            assert!(b.extract::<bool>().unwrap());
+
+            let i = meta_to_py(py, &Meta::Int(5)).unwrap();
+            let i = i.bind(py);
+            assert!(i.is_instance_of::<PyInt>());
+            assert_eq!(i.extract::<i64>().unwrap(), 5);
+
+            let f = meta_to_py(py, &Meta::Float(1.5)).unwrap();
+            let f = f.bind(py);
+            assert!(f.is_instance_of::<PyFloat>());
+            assert_eq!(f.extract::<f64>().unwrap(), 1.5);
+
+            let s = meta_to_py(py, &Meta::String("hi".to_string())).unwrap();
+            let s = s.bind(py);
+            assert!(s.is_instance_of::<PyString>());
+            assert_eq!(s.extract::<String>().unwrap(), "hi");
+        });
+    }
+
+    #[test]
+    fn meta_to_py_sequence_becomes_list() {
+        Python::attach(|py| {
+            let seq = Meta::Sequence(vec![Meta::Int(1), Meta::String("two".to_string())]);
+            let obj = meta_to_py(py, &seq).unwrap();
+            let list = obj.bind(py);
+            assert!(list.is_instance_of::<PyList>());
+            let list = list.downcast::<PyList>().unwrap();
+            assert_eq!(list.len(), 2);
+            assert_eq!(list.get_item(0).unwrap().extract::<i64>().unwrap(), 1);
+            assert_eq!(
+                list.get_item(1).unwrap().extract::<String>().unwrap(),
+                "two"
+            );
+        });
+    }
+
+    #[test]
+    fn meta_to_py_mapping_becomes_nested_dict() {
+        Python::attach(|py| {
+            let mut inner = StringMap::default();
+            inner.insert("name", Meta::String("Ada".to_string()));
+            let mut outer = StringMap::default();
+            outer.insert("author", Meta::Mapping(inner));
+            outer.insert("draft", Meta::Bool(false));
+
+            let obj = meta_to_py(py, &Meta::Mapping(outer)).unwrap();
+            let dict = obj.bind(py);
+            assert!(dict.is_instance_of::<PyDict>());
+            let dict = dict.downcast::<PyDict>().unwrap();
+
+            let author = dict.get_item("author").unwrap().unwrap();
+            let author = author.downcast::<PyDict>().unwrap();
+            assert_eq!(
+                author
+                    .get_item("name")
+                    .unwrap()
+                    .unwrap()
+                    .extract::<String>()
+                    .unwrap(),
+                "Ada"
+            );
+
+            assert!(
+                !dict
+                    .get_item("draft")
+                    .unwrap()
+                    .unwrap()
+                    .extract::<bool>()
+                    .unwrap()
+            );
+        });
+    }
 }

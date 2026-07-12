@@ -15,6 +15,8 @@ class AstNode:
     children: list[AstNode]
     text: str | None
     attributes: dict[str, str]
+    #: Deprecated (OMEP-0010): stringly-typed frontmatter, retained for backward
+    #: compatibility. Use ``parse_document(...).frontmatter`` for typed access.
     metadata: dict[str, str] | None
 
     def __init__(
@@ -31,8 +33,27 @@ class AstNode:
 
     def __repr__(self) -> str: ...
 
+class ParseResult:
+    """The AST tree plus structured, typed document metadata (OMEP-0010)."""
+
+    #: The parsed AST tree (identical to what ``parse`` returns).
+    root: AstNode
+    #: Typed YAML frontmatter, or ``None`` when the document has no frontmatter.
+    #: Values preserve their native YAML types (``str``, ``int``, ``float``,
+    #: ``bool``, ``list``, ``dict``, ``None``).
+    frontmatter: dict[str, object] | None
+
+    def __repr__(self) -> str: ...
+
 def parse(markdown: str) -> AstNode:
     """Parse Markdown input into an AST node tree."""
+    ...
+
+def parse_document(markdown: str) -> ParseResult:
+    """Parse Markdown and compute structured, typed metadata (OMEP-0010).
+
+    Returns a ``ParseResult`` bundling the AST tree with typed YAML frontmatter.
+    """
     ...
 
 def render_ast(node: AstNode) -> str:

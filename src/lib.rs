@@ -10,7 +10,7 @@ use rushdown::parser::{self, Parser, ParserExtension as _};
 use rushdown::renderer::html::{self, RendererExtension as _};
 use rushdown::text;
 
-use ast::AstNode;
+use ast::{AstNode, ParseResult};
 use extensions::{
     assign_heading_anchors, block_component_html_renderer_extension,
     block_component_parser_extension, inline_component_html_renderer_extension,
@@ -108,6 +108,26 @@ fn parse(markdown: &str) -> PyResult<AstNode> {
     })
 }
 
+/// Parse Markdown input and compute structured, typed document metadata.
+///
+/// This is the metadata-aware counterpart to [`parse`] (OMEP-0010). It returns
+/// a [`ParseResult`] bundling the same `AstNode` tree (as `root`) with typed
+/// YAML frontmatter (`frontmatter`), whose values preserve their native YAML
+/// types instead of being coerced to strings like the deprecated
+/// `AstNode.metadata` map. Consumers that only need the tree keep using
+/// [`parse`].
+#[pyfunction]
+fn parse_document(py: Python<'_>, markdown: &str) -> PyResult<ParseResult> {
+    with_parser(|parser| {
+        let mut reader = text::BasicReader::new(markdown);
+        let (mut arena, document_ref) = parser.parse(&mut reader);
+        assign_heading_anchors(&mut arena, document_ref, markdown);
+        let frontmatter = ast::document_frontmatter(py, &arena, document_ref)?;
+        let root = ast::arena_to_ast_node(&arena, document_ref, markdown);
+        Ok(ParseResult { root, frontmatter })
+    })
+}
+
 /// Render an `AstNode` tree to an HTML string.
 ///
 /// This is the second half of the pipeline, used after Python plugins
@@ -193,7 +213,9 @@ fn extract_summary(markdown: &str) -> Option<String> {
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<AstNode>()?;
+    m.add_class::<ParseResult>()?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_document, m)?)?;
     m.add_function(wrap_pyfunction!(render_ast, m)?)?;
     m.add_function(wrap_pyfunction!(markdown_to_html, m)?)?;
     m.add_function(wrap_pyfunction!(slugify, m)?)?;

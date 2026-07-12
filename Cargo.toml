@@ -19,3 +19,8 @@ rushdown = "0.11"
 rushdown-meta = "0.9"
 rushdown-emoji = "0.9"
 unicode-normalization = "0.1"
+
+[dev-dependencies]
+# Enable the embedded Python interpreter so `#[cfg(test)]` tests that touch the
+# PyO3 API (e.g. `meta_to_py`) can run under `cargo test` / `cargo nextest`.
+pyo3 = { version = "0.28", features = ["auto-initialize"] }
