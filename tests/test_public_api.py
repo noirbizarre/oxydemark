@@ -68,3 +68,20 @@ def test_package_ships_core_stub():
     assert os.path.exists(os.path.join(package_dir, "_core.pyi")), (
         "_core.pyi stub missing; required by OMEP-0008 typing strategy"
     )
+
+
+def test_contrib_is_not_in_frozen_surface():
+    """oxydemark.contrib is provisional: it must stay out of the frozen surface."""
+    import oxydemark.contrib
+
+    assert set(oxydemark.contrib.__all__).isdisjoint(PUBLIC_SURFACE)
+    for name in oxydemark.contrib.__all__:
+        assert name not in oxydemark.__all__, f"{name} leaked into the frozen surface"
+
+
+def test_contrib_exports_are_importable():
+    """Every name advertised by oxydemark.contrib must be a real attribute."""
+    import oxydemark.contrib
+
+    for name in oxydemark.contrib.__all__:
+        assert hasattr(oxydemark.contrib, name), f"{name} missing from oxydemark.contrib"
