@@ -870,6 +870,157 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // Comark: nested block components (OMEP-0007 Phase 3)
+    // -----------------------------------------------------------------------
+
+    /// Return the direct `block_component` children of a node.
+    fn nested_components(node: &AstNode) -> Vec<&AstNode> {
+        node.children
+            .iter()
+            .filter(|n| n.kind == "block_component")
+            .collect()
+    }
+
+    /// Return the `name` attribute of a component node.
+    fn component_name(node: &AstNode) -> &str {
+        node.attributes
+            .get("name")
+            .map(|v| v.as_str())
+            .expect("component should carry a name attribute")
+    }
+
+    #[test]
+    fn triple_colon_opens_block_component() {
+        let input = ":::note\nContent\n:::";
+        let ast = parse(input);
+        let note = find_block_component(&ast);
+        assert_eq!(component_name(note), "note");
+        assert_eq!(
+            note.children.first().map(|c| c.kind.as_str()),
+            Some("paragraph")
+        );
+    }
+
+    #[test]
+    fn nested_block_components_two_levels() {
+        let input = ":::outer\n::inner\nx\n::\n:::";
+        let ast = parse(input);
+        let outer = find_block_component(&ast);
+        assert_eq!(component_name(outer), "outer");
+
+        let inner_components = nested_components(outer);
+        assert_eq!(inner_components.len(), 1, "Expected one nested component");
+        let inner = inner_components[0];
+        assert_eq!(component_name(inner), "inner");
+        assert_eq!(
+            inner.children.first().map(|c| c.kind.as_str()),
+            Some("paragraph")
+        );
+    }
+
+    #[test]
+    fn nested_block_components_three_levels() {
+        let input = "::level-1\n:::level-2\n::::level-3\nContent\n::::\n:::\n::";
+        let ast = parse(input);
+
+        let level1 = find_block_component(&ast);
+        assert_eq!(component_name(level1), "level-1");
+
+        let level2 = nested_components(level1);
+        assert_eq!(level2.len(), 1, "Expected level-2 nested in level-1");
+        assert_eq!(component_name(level2[0]), "level-2");
+
+        let level3 = nested_components(level2[0]);
+        assert_eq!(level3.len(), 1, "Expected level-3 nested in level-2");
+        assert_eq!(component_name(level3[0]), "level-3");
+        assert_eq!(
+            level3[0].children.first().map(|c| c.kind.as_str()),
+            Some("paragraph")
+        );
+    }
+
+    #[test]
+    fn equal_colon_nesting_is_resolved_innermost_first() {
+        // Extra colons are a readability convention, not a requirement.
+        let input = "::level-1\n::level-2\nContent\n::\n::\n\nAfter";
+        let ast = parse(input);
+
+        let level1 = find_block_component(&ast);
+        let level2 = nested_components(level1);
+        assert_eq!(level2.len(), 1, "Expected level-2 nested in level-1");
+        assert_eq!(component_name(level2[0]), "level-2");
+
+        // Both closers were consumed: no stray `::` text is left anywhere.
+        assert!(
+            ast.walk()
+                .iter()
+                .all(|n| n.text.as_deref().is_none_or(|t| !t.contains("::"))),
+            "Closing fences should not leak into the document text"
+        );
+    }
+
+    #[test]
+    fn nested_component_inside_slot() {
+        let input = "::card\n#header\n:::badge\nNew\n:::\n::\n\nAfter";
+        let ast = parse(input);
+
+        let card = find_block_component(&ast);
+        let slots: Vec<&AstNode> = card.children.iter().filter(|n| n.kind == "slot").collect();
+        assert_eq!(slots.len(), 1, "Expected exactly one slot");
+
+        let badges = nested_components(slots[0]);
+        assert_eq!(badges.len(), 1, "Expected a component nested in the slot");
+        assert_eq!(component_name(badges[0]), "badge");
+
+        assert_eq!(
+            ast.children.last().map(|c| c.kind.as_str()),
+            Some("paragraph"),
+            "The component should close before the trailing paragraph"
+        );
+    }
+
+    #[test]
+    fn bare_colon_run_is_not_a_block_component() {
+        let input = "::::\n\nText";
+        let ast = parse(input);
+        assert!(
+            ast.walk().iter().all(|n| n.kind != "block_component"),
+            "A bare colon run should not open a component"
+        );
+    }
+
+    #[test]
+    fn content_after_closing_fence_is_a_sibling() {
+        let input = "::note\nHello\n::\nAfter";
+        let ast = parse(input);
+        let note = find_block_component(&ast);
+        assert_eq!(note.children.len(), 1, "Component holds only its own body");
+        assert_eq!(
+            ast.children.last().map(|c| c.kind.as_str()),
+            Some("paragraph"),
+            "Text after the closing fence is a sibling paragraph"
+        );
+    }
+
+    #[test]
+    fn render_nested_components_emit_nested_divs() {
+        let input = ":::outer\n::inner\nx\n::\n:::";
+        let expected = "<div>\n<div>\n<p>x</p>\n</div>\n</div>";
+
+        let html = markdown_to_html(input).unwrap();
+        assert!(
+            html.contains(expected),
+            "Fast path should emit nested divs, got: {html}"
+        );
+
+        let round_trip = render_ast_to_html(&parse(input));
+        assert!(
+            round_trip.contains(expected),
+            "AST round-trip should emit nested divs, got: {round_trip}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
     // Comark: in-component YAML props (OMEP-0007 Phase 3)
     // -----------------------------------------------------------------------
 
@@ -1422,18 +1573,6 @@ mod tests {
                 .to_string();
             assert_eq!(val, "hello");
         });
-    }
-
-    #[test]
-    fn block_component_not_triple_colon() {
-        // ::: should not match the block component parser (reserved for Phase 3).
-        let input = ":::note\nContent\n:::";
-        let ast = parse(input);
-        let nodes = ast.walk();
-        assert!(
-            nodes.iter().all(|n| n.kind != "block_component"),
-            "Triple colon should not create a block_component"
-        );
     }
 
     #[test]

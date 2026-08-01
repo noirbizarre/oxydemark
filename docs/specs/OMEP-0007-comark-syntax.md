@@ -459,11 +459,12 @@ Custom rushdown parser extensions implemented in `src/extensions.rs`:
 * **Block components** -- `::component{props}` syntax
 * **Inline components** -- `:component[content]{props}` syntax
 
-### Phase 3 (specified)
+### Phase 3 (implemented)
 
-Fully specified by this OMEP (grammar in [Syntax Overview](#syntax-overview),
+Specified by this OMEP (grammar in [Syntax Overview](#syntax-overview),
 node shapes in [AST Representation](#ast-representation), output in
-[Rendering Rules](#rendering-rules), and validation in [Compliance](#compliance)):
+[Rendering Rules](#rendering-rules), and validation in [Compliance](#compliance))
+and implemented in `src/extensions.rs`:
 
 * **Component slots** -- `#slot-name` syntax within block components; maps to
   `kind="slot"` nodes.

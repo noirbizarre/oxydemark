@@ -38,7 +38,8 @@ use crate::html_render::html_escape;
 /// A block component node: `::name{attrs}\ncontent\n::`.
 ///
 /// Represents a container block introduced by `::component_name{attributes}`.
-/// The component body runs until a closing `::` line. All component semantics
+/// The component body runs until a closing line made of the same number of
+/// colons as the opener (OMEP-0007 multi-colon nesting). All component semantics
 /// (name, attributes) are carried in the AST for Python plugins to consume.
 #[derive(Debug)]
 pub(crate) struct BlockComponent {
@@ -49,6 +50,16 @@ pub(crate) struct BlockComponent {
     /// declares no YAML props. Precedence against inline `{…}` attributes is
     /// resolved during AST conversion (see `src/ast.rs`).
     pub(crate) props: Option<ast::Meta>,
+    /// Number of colons in the opening fence (`>= 2`).
+    ///
+    /// The component closes on a line made of exactly this many colons.
+    pub(crate) colons: usize,
+    /// Parse-time state: `true` while the block is still open.
+    ///
+    /// rushdown calls `cont()` outermost-first and has no public notion of block
+    /// openness, so the parser tracks it here to resolve a closing fence against
+    /// the innermost matching level.
+    pub(crate) open: bool,
 }
 
 impl NodeKind for BlockComponent {
@@ -175,8 +186,53 @@ impl From<SpanAttributes> for KindData {
 // ---------------------------------------------------------------------------
 
 /// Parses block components: `::name{attrs}\ncontent\n::`.
+///
+/// Openers may use any run of `n >= 2` colons; the component then closes on a
+/// line made of exactly `n` colons (OMEP-0007 nested components).
 #[derive(Debug)]
 struct BlockComponentParser;
+
+/// If `trimmed` is made solely of colons, return the run length (`>= 2`).
+///
+/// Such a line is a component closing fence candidate; the run length selects
+/// which nesting level it closes.
+fn colon_run_len(trimmed: &str) -> Option<usize> {
+    if trimmed.len() >= 2 && trimmed.bytes().all(|b| b == b':') {
+        Some(trimmed.len())
+    } else {
+        None
+    }
+}
+
+/// Return the [`BlockComponent`] data of `node_ref`, if any.
+fn as_block_component(arena: &Arena, node_ref: NodeRef) -> Option<&BlockComponent> {
+    match arena[node_ref].kind_data() {
+        KindData::Extension(ext) => {
+            (ext.as_ref() as &dyn std::any::Any).downcast_ref::<BlockComponent>()
+        }
+        _ => None,
+    }
+}
+
+/// Return `true` if a still-open descendant component was opened with `colons`.
+///
+/// Open blocks always sit on the `last_child` chain, so the walk descends it and
+/// stops at the first component already closed.
+fn has_open_descendant_with_colons(arena: &Arena, node_ref: NodeRef, colons: usize) -> bool {
+    let mut current = arena[node_ref].last_child();
+    while let Some(node) = current {
+        if let Some(component) = as_block_component(arena, node) {
+            if !component.open {
+                return false;
+            }
+            if component.colons == colons {
+                return true;
+            }
+        }
+        current = arena[node].last_child();
+    }
+    false
+}
 
 impl BlockParser for BlockComponentParser {
     fn trigger(&self) -> &[u8] {
@@ -194,14 +250,15 @@ impl BlockParser for BlockComponentParser {
         let line = std::str::from_utf8(&line_bytes).ok()?;
         let trimmed = line.trim();
 
-        // Must start with :: but NOT ::: (Phase 3 nesting).
-        if !trimmed.starts_with("::") || trimmed.starts_with(":::") {
+        // The opening fence is a run of at least two colons.
+        let colons = trimmed.bytes().take_while(|&b| b == b':').count();
+        if colons < 2 {
             return None;
         }
 
-        let rest = trimmed[2..].trim();
+        let rest = trimmed[colons..].trim();
         if rest.is_empty() {
-            // This is a bare `::` which is a closing marker, not an opening.
+            // A bare colon run is a closing marker, not an opening.
             return None;
         }
 
@@ -236,7 +293,12 @@ impl BlockParser for BlockComponentParser {
         reader.advance_line();
         let props = consume_block_props(reader).and_then(|body| parse_props_yaml(&body));
 
-        let node_ref = arena.new_node(BlockComponent { name, props });
+        let node_ref = arena.new_node(BlockComponent {
+            name,
+            props,
+            colons,
+            open: true,
+        });
 
         // Parse and attach inline attributes.
         if let Some(attrs) = attr_str {
@@ -248,8 +310,8 @@ impl BlockParser for BlockComponentParser {
 
     fn cont(
         &self,
-        _arena: &mut Arena,
-        _node_ref: NodeRef,
+        arena: &mut Arena,
+        node_ref: NodeRef,
         reader: &mut text::BasicReader,
         _ctx: &mut Context,
     ) -> Option<State> {
@@ -257,14 +319,37 @@ impl BlockParser for BlockComponentParser {
         let line = std::str::from_utf8(&line_bytes).ok()?;
         let trimmed = line.trim();
 
-        // Closing marker: a line that is exactly `::`.
-        if trimmed == "::" {
-            reader.advance_line();
-            return None; // Close this block.
+        // Closing marker: a line made of exactly as many colons as the opener,
+        // resolved against the innermost still-open matching level.
+        if let Some(colons) = colon_run_len(trimmed) {
+            let matches = as_block_component(arena, node_ref)
+                .is_some_and(|component| component.colons == colons);
+            if matches && !has_open_descendant_with_colons(arena, node_ref, colons) {
+                // Consume the fence but stay on the line, so the driver does not
+                // offer it to inner parsers as a lazy paragraph continuation.
+                reader.advance_to_eol();
+                return None; // Close this block.
+            }
         }
 
         // Continue accepting children.
         Some(State::HAS_CHILDREN)
+    }
+
+    fn close(
+        &self,
+        arena: &mut Arena,
+        node_ref: NodeRef,
+        _reader: &mut text::BasicReader,
+        _ctx: &mut Context,
+    ) {
+        if let Some(node) = arena.get_mut(node_ref)
+            && let KindData::Extension(ext) = node.kind_data_mut()
+            && let Some(component) =
+                (ext.as_mut() as &mut dyn std::any::Any).downcast_mut::<BlockComponent>()
+        {
+            component.open = false;
+        }
     }
 
     fn can_interrupt_paragraph(&self) -> bool {
@@ -370,8 +455,8 @@ fn consume_block_props(reader: &mut text::BasicReader) -> Option<String> {
         };
         let trimmed = line.trim();
 
-        // A bare `::` closes the component before the block terminates.
-        if trimmed == "::" {
+        // A closing colon run ends the component before the block terminates.
+        if colon_run_len(trimmed).is_some() {
             reader.set_position(saved.0, saved.1);
             return None;
         }
@@ -448,13 +533,7 @@ fn slot_marker_name(line: &str) -> Option<&str> {
 
 /// Return `true` if `node_ref` refers to a [`BlockComponent`] extension node.
 fn is_block_component(arena: &Arena, node_ref: NodeRef) -> bool {
-    if let KindData::Extension(ext) = arena[node_ref].kind_data() {
-        (ext.as_ref() as &dyn std::any::Any)
-            .downcast_ref::<BlockComponent>()
-            .is_some()
-    } else {
-        false
-    }
+    as_block_component(arena, node_ref).is_some()
 }
 
 /// Parses component slots: `#slot-name` markers inside a block component body.
@@ -506,9 +585,10 @@ impl BlockParser for SlotParser {
         let line = std::str::from_utf8(&line_bytes).ok()?;
         let trimmed = line.trim();
 
-        // The closing `::` of the enclosing component or the next slot marker
-        // both end this slot; the line is left for the parent/sibling parser.
-        if trimmed == "::" || slot_marker_name(line).is_some() {
+        // The closing colon run of the enclosing component or the next slot
+        // marker both end this slot; the line is left for the parent/sibling
+        // parser.
+        if colon_run_len(trimmed).is_some() || slot_marker_name(line).is_some() {
             return None;
         }
 

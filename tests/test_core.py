@@ -540,10 +540,38 @@ class TestBlockComponents:
         html = oxydemark.render_ast(ast)
         assert "<div" in html
 
-    def test_triple_colon_not_block_component(self):
+    def test_triple_colon_block_component(self):
         ast = oxydemark.parse(":::note\nContent\n:::")
         nodes = ast.walk()
-        assert all(n.kind != "block_component" for n in nodes)
+        bc = next(n for n in nodes if n.kind == "block_component")
+        assert bc.attributes["name"] == "note"
+
+    def test_nested_components(self):
+        ast = oxydemark.parse(":::outer\n::inner\nContent\n::\n:::")
+        outer = next(n for n in ast.children if n.kind == "block_component")
+        assert outer.attributes["name"] == "outer"
+
+        inner = outer.children[0]
+        assert inner.kind == "block_component"
+        assert inner.attributes["name"] == "inner"
+        assert inner.children[0].kind == "paragraph"
+
+    def test_nested_components_deep(self):
+        ast = oxydemark.parse(
+            "::level-1\n:::level-2\n::::level-3\nContent\n::::\n:::\n::"
+        )
+        level1 = next(n for n in ast.children if n.kind == "block_component")
+        level2 = level1.children[0]
+        level3 = level2.children[0]
+        assert [n.attributes["name"] for n in (level1, level2, level3)] == [
+            "level-1",
+            "level-2",
+            "level-3",
+        ]
+
+    def test_nested_components_render(self):
+        html = oxydemark.markdown_to_html(":::outer\n::inner\nx\n::\n:::")
+        assert "<div>\n<div>\n<p>x</p>\n</div>\n</div>" in html
 
     def _block_component(self, ast):
         return next(n for n in ast.walk() if n.kind == "block_component")
