@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 
 use oxydemark::{
-    AstNode, OxydeError, ParseResult, extract_summary, markdown_to_html, parse, parse_document,
-    render_ast, slugify,
+    AstNode, Heading, OxydeError, ParseResult, extract_summary, markdown_to_html, parse,
+    parse_document, render_ast, slugify,
 };
 
 #[test]
@@ -97,4 +97,74 @@ fn ast_node_constructor_and_fields() {
     );
     assert_eq!(node.kind, "text");
     assert_eq!(node.text.as_deref(), Some("hi"));
+}
+
+#[test]
+fn parse_document_exposes_headings_and_toc() {
+    let result: ParseResult =
+        parse_document("# Title\n\n## Setup\n\n## Usage\n\n### CLI\n\n### Library\n\n## FAQ");
+
+    let flat: Vec<(u8, &str)> = result
+        .headings
+        .iter()
+        .map(|h: &Heading| (h.level, h.id.as_str()))
+        .collect();
+    assert_eq!(
+        flat,
+        [
+            (1, "title"),
+            (2, "setup"),
+            (2, "usage"),
+            (3, "cli"),
+            (3, "library"),
+            (2, "faq"),
+        ]
+    );
+    assert!(result.headings.iter().all(|h| h.children.is_empty()));
+    assert_eq!(result.headings[0].text, "Title");
+
+    assert_eq!(result.toc.len(), 1);
+    assert_eq!(result.toc[0].id, "title");
+    let children: Vec<&str> = result.toc[0]
+        .children
+        .iter()
+        .map(|h| h.id.as_str())
+        .collect();
+    assert_eq!(children, ["setup", "usage", "faq"]);
+    let nested: Vec<&str> = result.toc[0].children[1]
+        .children
+        .iter()
+        .map(|h| h.id.as_str())
+        .collect();
+    assert_eq!(nested, ["cli", "library"]);
+}
+
+#[test]
+fn parse_document_toc_anchors_match_rendered_ids() {
+    let markdown = "# Overview\n\n## Overview\n";
+    let result = parse_document(markdown);
+    let html = markdown_to_html(markdown).expect("renders");
+
+    for heading in &result.headings {
+        assert!(
+            html.contains(&format!("id=\"{}\"", heading.id)),
+            "missing id {} in {html}",
+            heading.id
+        );
+    }
+    assert_eq!(result.headings[1].id, "overview-1");
+}
+
+#[test]
+fn parse_document_exposes_summary() {
+    let result = parse_document("Intro.\n\n<!-- more -->\n\nBody.");
+    let summary = result.summary.expect("delimiter present");
+    assert!(summary.contains("<p>Intro.</p>"));
+    assert!(!summary.contains("Body"));
+    assert_eq!(
+        Some(summary),
+        extract_summary("Intro.\n\n<!-- more -->\n\nBody.")
+    );
+
+    assert!(parse_document("No delimiter here.").summary.is_none());
 }

@@ -2,6 +2,7 @@
 
 from oxydemark._core import (
     AstNode,
+    Heading,
     ParseResult,
     extract_summary,
     markdown_to_html,
@@ -14,6 +15,7 @@ from oxydemark.api import OxydeEngine, Plugin
 
 __all__ = [
     "AstNode",
+    "Heading",
     "OxydeEngine",
     "ParseResult",
     "Plugin",

@@ -33,5 +33,5 @@ mod python;
 
 // Frozen public Rust surface (OMEP-0008 + OMEP-0010).
 pub use api::{extract_summary, markdown_to_html, parse, parse_document, render_ast, slugify};
-pub use ast::{AstNode, ParseResult};
+pub use ast::{AstNode, Heading, ParseResult};
 pub use error::OxydeError;

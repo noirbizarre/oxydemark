@@ -8,7 +8,7 @@
 use pyo3::prelude::*;
 
 use crate::api;
-use crate::ast::{AstNode, ParseResult};
+use crate::ast::{AstNode, Heading, ParseResult};
 
 /// Parse Markdown input into an AST node tree.
 #[pyfunction]
@@ -57,6 +57,7 @@ fn py_extract_summary(markdown: &str) -> Option<String> {
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<AstNode>()?;
+    m.add_class::<Heading>()?;
     m.add_class::<ParseResult>()?;
     m.add_function(wrap_pyfunction!(py_parse, m)?)?;
     m.add_function(wrap_pyfunction!(py_parse_document, m)?)?;

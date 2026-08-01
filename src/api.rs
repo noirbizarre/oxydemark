@@ -112,20 +112,48 @@ pub fn parse(markdown: &str) -> AstNode {
 /// Parse Markdown input and compute structured, typed document metadata.
 ///
 /// This is the metadata-aware counterpart to [`parse`] (OMEP-0010). It returns
-/// a [`ParseResult`] bundling the same `AstNode` tree (as `root`) with typed
-/// YAML frontmatter (`frontmatter`), whose values preserve their native YAML
-/// types instead of being coerced to strings like the deprecated
-/// `AstNode.metadata` map. Consumers that only need the tree keep using
-/// [`parse`].
+/// a [`ParseResult`] bundling the same `AstNode` tree (as `root`) with the flat
+/// heading list (`headings`), the nested table-of-contents tree (`toc`), the
+/// summary HTML (`summary`) and typed YAML frontmatter (`frontmatter`), whose
+/// values preserve their native YAML types instead of being coerced to strings
+/// like the deprecated `AstNode.metadata` map. Consumers that only need the
+/// tree keep using [`parse`].
 pub fn parse_document(markdown: &str) -> ParseResult {
     with_parser(|parser| {
         let mut reader = text::BasicReader::new(markdown);
         let (mut arena, document_ref) = parser.parse(&mut reader);
         assign_heading_anchors(&mut arena, document_ref, markdown);
         let frontmatter = ast::document_meta(&arena, document_ref);
+        let headings = ast::collect_headings(&arena, document_ref, markdown);
+        let toc = ast::build_toc(&headings);
+        let summary =
+            ast::extract_summary_blocks(&arena, document_ref, markdown).map(render_summary_blocks);
         let root = ast::arena_to_ast_node(&arena, document_ref, markdown);
-        ParseResult { root, frontmatter }
+        ParseResult {
+            root,
+            headings,
+            toc,
+            summary,
+            frontmatter,
+        }
     })
+}
+
+/// Render the top-level blocks preceding a summary delimiter to HTML.
+///
+/// The blocks are wrapped in a synthetic `document` node so they go through
+/// the very same renderer as [`render_ast`], keeping summary and full-body
+/// markup consistent.
+fn render_summary_blocks(blocks: Vec<AstNode>) -> String {
+    let summary_doc = AstNode {
+        kind: "document".to_string(),
+        children: blocks,
+        text: None,
+        attributes: std::collections::HashMap::new(),
+        metadata: None,
+        props: None,
+    };
+    render_ast_to_html(&summary_doc)
 }
 
 /// Render an `AstNode` tree to an HTML string.
@@ -195,15 +223,7 @@ pub fn extract_summary(markdown: &str) -> Option<String> {
         let (mut arena, document_ref) = parser.parse(&mut reader);
         assign_heading_anchors(&mut arena, document_ref, markdown);
         let blocks = ast::extract_summary_blocks(&arena, document_ref, markdown)?;
-        let summary_doc = AstNode {
-            kind: "document".to_string(),
-            children: blocks,
-            text: None,
-            attributes: std::collections::HashMap::new(),
-            metadata: None,
-            props: None,
-        };
-        Some(render_ast_to_html(&summary_doc))
+        Some(render_summary_blocks(blocks))
     })
 }
 
@@ -1761,5 +1781,116 @@ mod tests {
     fn summary_empty_when_delimiter_is_first_block() {
         let summary = extract_summary("<!-- more -->\n\nBody.").expect("delimiter present");
         assert_eq!(summary, "");
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_document headings / TOC (OMEP-0010)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_document_headings_are_flat_and_ordered() {
+        let result = parse_document("# Title\n\n## Setup\n\n### CLI\n\n## FAQ");
+        let flat: Vec<(u8, &str, &str)> = result
+            .headings
+            .iter()
+            .map(|h| (h.level, h.id.as_str(), h.text.as_str()))
+            .collect();
+        assert_eq!(
+            flat,
+            [
+                (1, "title", "Title"),
+                (2, "setup", "Setup"),
+                (3, "cli", "CLI"),
+                (2, "faq", "FAQ"),
+            ]
+        );
+        assert!(result.headings.iter().all(|h| h.children.is_empty()));
+    }
+
+    #[test]
+    fn parse_document_toc_nests_by_level() {
+        let result = parse_document("# Title\n\n## Setup\n\n### CLI\n\n## FAQ");
+        assert_eq!(result.toc.len(), 1);
+        let level_two: Vec<&str> = result.toc[0]
+            .children
+            .iter()
+            .map(|h| h.id.as_str())
+            .collect();
+        assert_eq!(level_two, ["setup", "faq"]);
+        assert_eq!(result.toc[0].children[0].children[0].id, "cli");
+    }
+
+    #[test]
+    fn parse_document_toc_tolerates_level_skips() {
+        let result = parse_document("# Title\n\n### Deep");
+        assert_eq!(result.toc.len(), 1);
+        assert_eq!(result.toc[0].children[0].id, "deep");
+        assert_eq!(result.toc[0].children[0].level, 3);
+    }
+
+    #[test]
+    fn parse_document_headings_include_block_components() {
+        let result = parse_document("# Title\n\n::note\n## Inside\n::\n\n## After");
+        let ids: Vec<&str> = result.headings.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(ids, ["title", "inside", "after"]);
+    }
+
+    #[test]
+    fn parse_document_heading_ids_are_deduplicated() {
+        let result = parse_document("# Overview\n\n## Overview");
+        let ids: Vec<&str> = result.headings.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(ids, ["overview", "overview-1"]);
+    }
+
+    #[test]
+    fn parse_document_heading_honours_author_provided_id() {
+        let result = parse_document("# Title {#custom}");
+        assert_eq!(result.headings[0].id, "custom");
+    }
+
+    #[test]
+    fn parse_document_without_headings_is_empty() {
+        let result = parse_document("Just a paragraph.");
+        assert!(result.headings.is_empty());
+        assert!(result.toc.is_empty());
+    }
+
+    #[test]
+    fn parse_document_ids_match_rendered_html() {
+        let markdown = "# Overview\n\n## Overview";
+        let result = parse_document(markdown);
+        let html = markdown_to_html(markdown).expect("renders");
+        for heading in &result.headings {
+            assert!(html.contains(&format!("id=\"{}\"", heading.id)));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_document summary (OMEP-0010)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_document_summary_matches_extract_summary() {
+        let markdown = "Intro.\n\n<!-- more -->\n\nBody.";
+        assert_eq!(parse_document(markdown).summary, extract_summary(markdown));
+        assert!(
+            parse_document(markdown)
+                .summary
+                .expect("delimiter present")
+                .contains("<p>Intro.</p>")
+        );
+    }
+
+    #[test]
+    fn parse_document_summary_is_none_without_delimiter() {
+        assert!(parse_document("No delimiter.").summary.is_none());
+    }
+
+    #[test]
+    fn parse_document_root_still_contains_delimiter() {
+        let result = parse_document("Intro.\n\n<!-- more -->\n\nBody.");
+        let html = render_ast(&result.root);
+        assert!(html.contains("Intro."));
+        assert!(html.contains("Body."));
     }
 }

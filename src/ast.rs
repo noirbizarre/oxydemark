@@ -245,6 +245,180 @@ impl AstNode {
 }
 
 // ---------------------------------------------------------------------------
+// Heading / table of contents (OMEP-0010)
+// ---------------------------------------------------------------------------
+
+/// A document heading, used both as a flat entry of
+/// [`ParseResult::headings`] and as a node of the nested
+/// [`ParseResult::toc`] tree (OMEP-0010).
+///
+/// # Examples
+///
+/// From Python:
+/// ```python
+/// result = oxydemark.parse_document("# Title\n## Setup")
+/// [(h.level, h.id) for h in result.headings]  # [(1, 'title'), (2, 'setup')]
+/// result.toc[0].children[0].id                # 'setup'
+/// ```
+#[cfg_attr(feature = "python", pyclass(skip_from_py_object))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Heading {
+    /// Heading level, 1 to 6.
+    pub level: u8,
+
+    /// The anchor id assigned to the heading (see [`crate::slugify`]).
+    pub id: String,
+
+    /// Plain-text heading label (the same text the slug is derived from,
+    /// before slugging).
+    pub text: String,
+
+    /// Nested sub-headings.
+    ///
+    /// Always empty for entries of the flat [`ParseResult::headings`] list;
+    /// populated only in the [`ParseResult::toc`] tree.
+    pub children: Vec<Heading>,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl Heading {
+    /// Heading level, 1 to 6.
+    #[getter]
+    fn level(&self) -> u8 {
+        self.level
+    }
+
+    /// The anchor id assigned to the heading.
+    #[getter]
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    /// Plain-text heading label.
+    #[getter]
+    fn text(&self) -> String {
+        self.text.clone()
+    }
+
+    /// Nested sub-headings (empty in the flat `headings` list).
+    #[getter]
+    fn children(&self) -> Vec<Heading> {
+        self.children.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Heading(level={}, id={:?}, text={:?}, children={})",
+            self.level,
+            self.id,
+            self.text,
+            self.children.len()
+        )
+    }
+}
+
+/// Collect every heading of the document, in document order, as a flat list.
+///
+/// Anchors must already have been assigned by
+/// [`crate::extensions::assign_heading_anchors`]; the `id` is read from the
+/// heading node's attributes. Headings nested inside block components and
+/// slots are included, in document order like any other heading. The returned
+/// entries always have an empty `children` list; use [`build_toc`] to derive
+/// the nested tree.
+pub(crate) fn collect_headings(
+    arena: &ast::Arena,
+    document_ref: NodeRef,
+    source: &str,
+) -> Vec<Heading> {
+    let mut refs: Vec<NodeRef> = Vec::new();
+    crate::extensions::collect_headings(arena, document_ref, &mut refs);
+
+    refs.into_iter()
+        .map(|heading_ref| {
+            let node = &arena[heading_ref];
+            let level = match node.kind_data() {
+                KindData::Heading(h) => h.level(),
+                // `collect_headings` only ever yields heading nodes.
+                _ => 0,
+            };
+            let id = node
+                .attributes()
+                .get("id")
+                .map(|v| v.str(source).to_string())
+                .unwrap_or_default();
+            Heading {
+                level,
+                id,
+                text: crate::extensions::heading_text(arena, heading_ref, source),
+                children: Vec::new(),
+            }
+        })
+        .collect()
+}
+
+/// Build the nested table-of-contents tree from a flat, document-ordered
+/// heading list (OMEP-0010).
+///
+/// A heading of level `L` becomes a child of the nearest preceding heading
+/// whose level is strictly lower; headings with no shallower ancestor become
+/// roots. Level skips are tolerated: `#` followed directly by `###` nests the
+/// `###` under the `#`.
+pub(crate) fn build_toc(flat: &[Heading]) -> Vec<Heading> {
+    let mut roots: Vec<Heading> = Vec::new();
+    // Path of indices from `roots` down to the currently open heading.
+    let mut stack: Vec<usize> = Vec::new();
+
+    for heading in flat {
+        let node = Heading {
+            level: heading.level,
+            id: heading.id.clone(),
+            text: heading.text.clone(),
+            children: Vec::new(),
+        };
+
+        // Pop until the open ancestor is strictly shallower than `heading`.
+        while !stack.is_empty() {
+            let parent = heading_at(&roots, &stack);
+            if parent.level < node.level {
+                break;
+            }
+            stack.pop();
+        }
+
+        if stack.is_empty() {
+            roots.push(node);
+            stack.push(roots.len() - 1);
+        } else {
+            let parent = heading_at_mut(&mut roots, &stack);
+            parent.children.push(node);
+            let index = parent.children.len() - 1;
+            stack.push(index);
+        }
+    }
+
+    roots
+}
+
+/// Resolve the heading addressed by `path` (a list of child indices).
+fn heading_at<'a>(roots: &'a [Heading], path: &[usize]) -> &'a Heading {
+    let mut node = &roots[path[0]];
+    for &index in &path[1..] {
+        node = &node.children[index];
+    }
+    node
+}
+
+/// Mutable counterpart of [`heading_at`].
+fn heading_at_mut<'a>(roots: &'a mut [Heading], path: &[usize]) -> &'a mut Heading {
+    let mut node = &mut roots[path[0]];
+    for &index in &path[1..] {
+        node = &mut node.children[index];
+    }
+    node
+}
+
+// ---------------------------------------------------------------------------
 // ParseResult (OMEP-0010)
 // ---------------------------------------------------------------------------
 
@@ -273,6 +447,23 @@ pub struct ParseResult {
     /// cannot be `#[cfg_attr]`-gated in PyO3 0.28.
     pub root: AstNode,
 
+    /// Every heading of the document, in document order, as a flat list.
+    ///
+    /// Entries always have an empty `children` list; the nesting lives in
+    /// [`ParseResult::toc`].
+    pub headings: Vec<Heading>,
+
+    /// The nested table-of-contents tree derived from
+    /// [`ParseResult::headings`].
+    pub toc: Vec<Heading>,
+
+    /// Rendered HTML of the content preceding the `<!-- more -->` delimiter,
+    /// or `None` when the document has no top-level delimiter.
+    ///
+    /// Identical to what [`crate::extract_summary`] returns, but computed as
+    /// part of the same parse.
+    pub summary: Option<String>,
+
     /// Typed YAML frontmatter, or `None` when the document has no frontmatter.
     ///
     /// On the pure-Rust surface this is a [`rushdown::ast::Meta`] mapping,
@@ -290,6 +481,24 @@ impl ParseResult {
     #[getter]
     fn root(&self) -> AstNode {
         self.root.clone()
+    }
+
+    /// Every heading of the document, in document order (flat).
+    #[getter]
+    fn headings(&self) -> Vec<Heading> {
+        self.headings.clone()
+    }
+
+    /// The nested table-of-contents tree.
+    #[getter]
+    fn toc(&self) -> Vec<Heading> {
+        self.toc.clone()
+    }
+
+    /// Rendered HTML of the content before `<!-- more -->`, or `None`.
+    #[getter]
+    fn summary(&self) -> Option<String> {
+        self.summary.clone()
     }
 
     /// Typed YAML frontmatter as a Python `dict`, or `None`.
@@ -676,6 +885,85 @@ pub(crate) fn extract_summary_blocks(
         child = arena[child_ref].next_sibling();
     }
     None
+}
+
+#[cfg(test)]
+mod toc_tests {
+    use super::*;
+
+    /// Build a flat heading entry (as [`collect_headings`] would produce).
+    fn flat(level: u8, id: &str) -> Heading {
+        Heading {
+            level,
+            id: id.to_string(),
+            text: id.to_string(),
+            children: Vec::new(),
+        }
+    }
+
+    /// Collect the ids of a heading list, one level deep.
+    fn ids(headings: &[Heading]) -> Vec<&str> {
+        headings.iter().map(|h| h.id.as_str()).collect()
+    }
+
+    #[test]
+    fn empty_input_yields_empty_tree() {
+        assert!(build_toc(&[]).is_empty());
+    }
+
+    #[test]
+    fn omep_example_nests_as_specified() {
+        let flat_list = vec![
+            flat(1, "title"),
+            flat(2, "setup"),
+            flat(2, "usage"),
+            flat(3, "cli"),
+            flat(3, "library"),
+            flat(2, "faq"),
+        ];
+        let toc = build_toc(&flat_list);
+
+        assert_eq!(ids(&toc), ["title"]);
+        assert_eq!(ids(&toc[0].children), ["setup", "usage", "faq"]);
+        assert_eq!(ids(&toc[0].children[1].children), ["cli", "library"]);
+        assert!(toc[0].children[0].children.is_empty());
+    }
+
+    #[test]
+    fn level_skips_are_tolerated() {
+        let toc = build_toc(&[flat(1, "a"), flat(3, "b")]);
+        assert_eq!(ids(&toc), ["a"]);
+        assert_eq!(ids(&toc[0].children), ["b"]);
+        assert_eq!(toc[0].children[0].level, 3);
+    }
+
+    #[test]
+    fn siblings_at_top_level_are_multiple_roots() {
+        let toc = build_toc(&[flat(1, "a"), flat(1, "b"), flat(2, "b1")]);
+        assert_eq!(ids(&toc), ["a", "b"]);
+        assert!(toc[0].children.is_empty());
+        assert_eq!(ids(&toc[1].children), ["b1"]);
+    }
+
+    #[test]
+    fn shallower_heading_pops_open_ancestors() {
+        let toc = build_toc(&[flat(2, "a"), flat(4, "a1"), flat(3, "a2"), flat(2, "b")]);
+        assert_eq!(ids(&toc), ["a", "b"]);
+        assert_eq!(ids(&toc[0].children), ["a1", "a2"]);
+    }
+
+    #[test]
+    fn document_starting_deep_still_has_roots() {
+        let toc = build_toc(&[flat(3, "a"), flat(2, "b")]);
+        assert_eq!(ids(&toc), ["a", "b"]);
+    }
+
+    #[test]
+    fn flat_entries_are_left_untouched() {
+        let flat_list = vec![flat(1, "a"), flat(2, "b")];
+        let _ = build_toc(&flat_list);
+        assert!(flat_list.iter().all(|h| h.children.is_empty()));
+    }
 }
 
 #[cfg(all(test, feature = "python"))]

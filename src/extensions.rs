@@ -1030,7 +1030,7 @@ pub(crate) fn assign_heading_anchors(arena: &mut Arena, root: NodeRef, source: &
 }
 
 /// Collect all `heading` node refs under `node_ref` in document order.
-fn collect_headings(arena: &Arena, node_ref: NodeRef, out: &mut Vec<NodeRef>) {
+pub(crate) fn collect_headings(arena: &Arena, node_ref: NodeRef, out: &mut Vec<NodeRef>) {
     if matches!(arena[node_ref].kind_data(), KindData::Heading(_)) {
         out.push(node_ref);
     }
@@ -1046,7 +1046,7 @@ fn collect_headings(arena: &Arena, node_ref: NodeRef, out: &mut Vec<NodeRef>) {
 /// Descendant `Text` and `RawHtml` nodes contribute their raw content; emoji
 /// extension nodes contribute their shortcode (e.g. `wave`) rather than the
 /// Unicode character, keeping anchors ASCII-friendly.
-fn heading_text(arena: &Arena, node_ref: NodeRef, source: &str) -> String {
+pub(crate) fn heading_text(arena: &Arena, node_ref: NodeRef, source: &str) -> String {
     let mut out = String::new();
     collect_heading_text(arena, node_ref, source, &mut out);
     out

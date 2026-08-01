@@ -30,6 +30,7 @@ SNIPPET = textwrap.dedent(
     import oxydemark
     from oxydemark import (
         AstNode,
+        Heading,
         OxydeEngine,
         ParseResult,
         Plugin,
@@ -52,6 +53,13 @@ SNIPPET = textwrap.dedent(
     result: ParseResult = parse_document("---\\ntitle: x\\n---\\n# Title")
     root: AstNode = result.root
     frontmatter: dict[str, object] | None = result.frontmatter
+    headings: list[Heading] = result.headings
+    toc: list[Heading] = result.toc
+    level: int = headings[0].level
+    heading_id: str = headings[0].id
+    heading_text: str = headings[0].text
+    nested: list[Heading] = toc[0].children
+    doc_summary: str | None = result.summary
 
     anchor: str = slugify("Some Heading", ["existing"])
     summary: str | None = extract_summary("intro\\n\\n<!-- more -->\\n\\nrest")

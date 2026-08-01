@@ -20,10 +20,11 @@ def _package_dir() -> str:
     return spec.submodule_search_locations[0]
 
 # The frozen public Python surface, per OMEP-0008, extended additively by
-# OMEP-0010 (slugify, extract_summary, parse_document, ParseResult).
+# OMEP-0010 (slugify, extract_summary, parse_document, ParseResult, Heading).
 PUBLIC_SURFACE = frozenset(
     {
         "AstNode",
+        "Heading",
         "OxydeEngine",
         "ParseResult",
         "Plugin",

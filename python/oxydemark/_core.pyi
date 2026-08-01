@@ -3,7 +3,7 @@
 This stub is the source of truth for static type checkers, since the compiled
 Rust module cannot be introspected from source. It must be kept in sync with
 the ``#[pymethods]`` in ``src/ast.rs`` and the ``#[pyfunction]`` definitions in
-``src/lib.rs`` (see OMEP-0008).
+``src/python.rs`` (see OMEP-0008).
 """
 
 from __future__ import annotations
@@ -40,15 +40,45 @@ class AstNode:
 
     def __repr__(self) -> str: ...
 
+class Heading:
+    """A document heading, flat entry or TOC tree node (OMEP-0010)."""
+
+    #: Heading level, 1 to 6.
+    @property
+    def level(self) -> int: ...
+    #: The anchor id assigned to the heading.
+    @property
+    def id(self) -> str: ...
+    #: Plain-text heading label (the text the slug is derived from).
+    @property
+    def text(self) -> str: ...
+    #: Nested sub-headings. Always empty for entries of the flat
+    #: ``ParseResult.headings`` list; populated only in ``ParseResult.toc``.
+    @property
+    def children(self) -> list[Heading]: ...
+    def __repr__(self) -> str: ...
+
 class ParseResult:
     """The AST tree plus structured, typed document metadata (OMEP-0010)."""
 
     #: The parsed AST tree (identical to what ``parse`` returns).
-    root: AstNode
+    @property
+    def root(self) -> AstNode: ...
+    #: Every heading of the document, in document order (flat).
+    @property
+    def headings(self) -> list[Heading]: ...
+    #: The nested table-of-contents tree.
+    @property
+    def toc(self) -> list[Heading]: ...
+    #: Rendered HTML of the content before a top-level ``<!-- more -->``
+    #: delimiter, or ``None`` when the document has no delimiter.
+    @property
+    def summary(self) -> str | None: ...
     #: Typed YAML frontmatter, or ``None`` when the document has no frontmatter.
     #: Values preserve their native YAML types (``str``, ``int``, ``float``,
     #: ``bool``, ``list``, ``dict``, ``None``).
-    frontmatter: dict[str, object] | None
+    @property
+    def frontmatter(self) -> dict[str, object] | None: ...
 
     def __repr__(self) -> str: ...
 
@@ -59,7 +89,9 @@ def parse(markdown: str) -> AstNode:
 def parse_document(markdown: str) -> ParseResult:
     """Parse Markdown and compute structured, typed metadata (OMEP-0010).
 
-    Returns a ``ParseResult`` bundling the AST tree with typed YAML frontmatter.
+    Returns a ``ParseResult`` bundling the AST tree with the flat heading list,
+    the nested table-of-contents tree, the summary HTML and typed YAML
+    frontmatter.
     """
     ...
 

@@ -824,3 +824,108 @@ class TestSummary:
 
     def test_empty_when_delimiter_is_first_block(self):
         assert oxydemark.extract_summary("<!-- more -->\n\nBody.") == ""
+
+
+# ---------------------------------------------------------------------------
+# Headings / table of contents (OMEP-0010)
+# ---------------------------------------------------------------------------
+
+
+TOC_SOURCE = "# Title\n\n## Setup\n\n## Usage\n\n### CLI\n\n### Library\n\n## FAQ"
+
+
+class TestHeadings:
+    """Tests for the flat ParseResult.headings list (OMEP-0010)."""
+
+    def test_flat_list_in_document_order(self):
+        result = oxydemark.parse_document(TOC_SOURCE)
+        assert [(h.level, h.id) for h in result.headings] == [
+            (1, "title"),
+            (2, "setup"),
+            (2, "usage"),
+            (3, "cli"),
+            (3, "library"),
+            (2, "faq"),
+        ]
+
+    def test_flat_entries_have_no_children(self):
+        result = oxydemark.parse_document(TOC_SOURCE)
+        assert all(h.children == [] for h in result.headings)
+
+    def test_text_is_the_plain_label(self):
+        result = oxydemark.parse_document("## Hello **world**")
+        assert result.headings[0].text == "Hello world"
+        assert result.headings[0].id == "hello-world"
+
+    def test_empty_without_headings(self):
+        result = oxydemark.parse_document("Just a paragraph.")
+        assert result.headings == []
+        assert result.toc == []
+
+    def test_ids_match_rendered_html(self):
+        src = "# Overview\n\n## Overview"
+        result = oxydemark.parse_document(src)
+        html = oxydemark.markdown_to_html(src)
+        assert [h.id for h in result.headings] == ["overview", "overview-1"]
+        for heading in result.headings:
+            assert f'id="{heading.id}"' in html
+
+    def test_author_provided_id_is_used(self):
+        result = oxydemark.parse_document("# Title {#custom}")
+        assert result.headings[0].id == "custom"
+
+    def test_headings_inside_block_components(self):
+        src = "# Title\n\n::note\n## Inside\n::\n\n## After"
+        result = oxydemark.parse_document(src)
+        assert [h.id for h in result.headings] == ["title", "inside", "after"]
+
+    def test_repr(self):
+        result = oxydemark.parse_document("# Title")
+        assert "Heading(" in repr(result.headings[0])
+
+
+class TestToc:
+    """Tests for the nested ParseResult.toc tree (OMEP-0010)."""
+
+    def test_nesting_matches_spec_example(self):
+        result = oxydemark.parse_document(TOC_SOURCE)
+        assert [h.id for h in result.toc] == ["title"]
+        assert [c.id for c in result.toc[0].children] == ["setup", "usage", "faq"]
+        assert [c.id for c in result.toc[0].children[1].children] == ["cli", "library"]
+
+    def test_level_skips_are_tolerated(self):
+        result = oxydemark.parse_document("# Title\n\n### Deep")
+        assert [c.id for c in result.toc[0].children] == ["deep"]
+        assert result.toc[0].children[0].level == 3
+
+    def test_multiple_roots(self):
+        result = oxydemark.parse_document("# One\n\n# Two\n\n## Two One")
+        assert [h.id for h in result.toc] == ["one", "two"]
+        assert result.toc[0].children == []
+        assert [c.id for c in result.toc[1].children] == ["two-one"]
+
+    def test_shallower_heading_closes_ancestors(self):
+        src = "## A\n\n#### A1\n\n### A2\n\n## B"
+        result = oxydemark.parse_document(src)
+        assert [h.id for h in result.toc] == ["a", "b"]
+        assert [c.id for c in result.toc[0].children] == ["a1", "a2"]
+
+
+class TestParseResultSummary:
+    """Tests for the summary folded into parse_document (OMEP-0010)."""
+
+    def test_matches_extract_summary(self):
+        src = "Intro.\n\n<!-- more -->\n\nBody."
+        result = oxydemark.parse_document(src)
+        assert result.summary == oxydemark.extract_summary(src)
+        assert result.summary is not None
+        assert "<p>Intro.</p>" in result.summary
+
+    def test_none_without_delimiter(self):
+        assert oxydemark.parse_document("No delimiter.").summary is None
+
+    def test_root_still_renders_full_document(self):
+        result = oxydemark.parse_document("Intro.\n\n<!-- more -->\n\nBody.")
+        html = oxydemark.render_ast(result.root)
+        assert "Intro." in html
+        assert "Body." in html
