@@ -5,9 +5,15 @@ edition = "2024"
 description = "Extensible Markdown pipelines powered by Rust"
 license = "MIT"
 repository = "https://github.com/noirbizarre/oxydemark"
+documentation = "https://docs.rs/oxydemark"
 readme = "README.md"
 keywords = ["extensible", "markdown", "pipeline", "ast", "pyo3"]
 categories = ["text-processing", "parser-implementations"]
+
+# docs.rs builds with the default (PyO3-free) feature set, which is exactly the
+# surface downstream crates consume (OMEP-0008 / OMEP-0011).
+[package.metadata.docs.rs]
+all-features = false
 
 [lib]
 name = "oxydemark"

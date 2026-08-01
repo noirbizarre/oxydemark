@@ -1,0 +1,115 @@
+# Documentation site configuration (OMEP-0011).
+#
+# Build with `mise run docs`, preview with `mise run docs:serve`. The rustdoc
+# reference is generated separately by `mise run docs:rust` and copied into
+# `site/rust/` so a single artifact serves both API references.
+
+[project]
+site_name = "OxydeMark"
+site_url = "https://noirbizarre.github.io/oxydemark/"
+site_description = "Extensible Markdown pipelines powered by Rust"
+site_author = "Axel H."
+copyright = "&copy; 2026 Axel H."
+docs_dir = "docs"
+site_dir = "site"
+repo_url = "https://github.com/noirbizarre/oxydemark"
+repo_name = "noirbizarre/oxydemark"
+edit_uri = "edit/main/docs/"
+# The Python sources back the API reference; rebuild the site when they change.
+watch = ["python/oxydemark"]
+
+nav = [
+  { "Home" = "index.md" },
+  { "Plugins" = "plugins.md" },
+  { "API reference" = [
+    "api/index.md",
+    "api/python.md",
+    "api/rust.md",
+  ] },
+  { "Design (OMEPs)" = [
+    "specs/README.md",
+    "specs/OMEP-0001-project-architecture.md",
+    "specs/OMEP-0002-task-management.md",
+    "specs/OMEP-0003-changelog-management.md",
+    "specs/OMEP-0004-pre-commit-hooks.md",
+    "specs/OMEP-0005-ci-cd-pipeline.md",
+    "specs/OMEP-0006-markdown-parser.md",
+    "specs/OMEP-0007-comark-syntax.md",
+    "specs/OMEP-0008-public-api.md",
+    "specs/OMEP-0009-publishing.md",
+    "specs/OMEP-0010-metadata-extraction.md",
+    "specs/OMEP-0011-documentation.md",
+  ] },
+]
+
+[project.theme]
+variant = "modern"
+features = [
+  "content.action.edit",
+  "content.code.copy",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.tabs",
+  "navigation.top",
+  "navigation.tracking",
+  "toc.follow",
+]
+
+# Colour palettes, evaluated in order on first visit: the site follows the
+# operating system preference by default, and the header toggle cycles
+# system -> light -> dark.
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+# Markdown extensions used by the guides and by the rendered docstrings.
+[project.markdown_extensions]
+admonition = {}
+attr_list = {}
+md_in_html = {}
+tables = {}
+"pymdownx.details" = {}
+"pymdownx.superfences" = {}
+
+[project.markdown_extensions."pymdownx.highlight"]
+anchor_linenums = true
+
+[project.markdown_extensions.toc]
+permalink = true
+
+# API reference generation (OMEP-0011). Docstrings for the native `_core`
+# module live in `python/oxydemark/_core.pyi`; `allow_inspection = false` forces
+# griffe to analyse sources statically so it reads the stub rather than
+# introspecting the compiled extension, which only carries summary lines.
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["python"]
+inventories = ["https://docs.python.org/3/objects.inv"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+allow_inspection = false
+docstring_style = "google"
+docstring_section_style = "table"
+filters = ["!^_"]
+heading_level = 3
+merge_init_into_class = true
+separate_signature = true
+show_root_heading = true
+show_root_full_path = false
+show_signature_annotations = true
+show_source = false
+show_symbol_type_heading = true
+show_symbol_type_toc = true
+signature_crossrefs = true
