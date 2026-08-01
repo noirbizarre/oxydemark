@@ -55,6 +55,29 @@ html = engine.render(md)
 print(html)
 ```
 
+## Plugins
+
+A plugin is any object implementing one or more of the `preprocess`,
+`transform` and `postprocess` hooks. No base class, no registration:
+
+```python
+from oxydemark import OxydeEngine
+from oxydemark.contrib import AdmonitionPlugin, MentionPlugin
+
+
+class Shouty:
+    def postprocess(self, html: str) -> str:
+        return html.upper()
+
+
+engine = OxydeEngine(plugins=[AdmonitionPlugin(), MentionPlugin(), Shouty()])
+print(engine.render("> [!NOTE]\n> Ping @alice\n"))
+```
+
+`oxydemark.contrib` ships four worked examples (admonitions, shortcodes,
+mentions, lazy images). See the [plugin guide](docs/plugins.md) for the full
+authoring documentation, including the AST value-semantics rules.
+
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
@@ -83,7 +106,9 @@ oxydemark/
 │   └── html_render.rs      # AST-to-HTML renderer
 ├── python/oxydemark/       # Python package
 │   ├── __init__.py         # Re-exports from native module
-│   └── api.py              # OxydeEngine, plugin protocol
+│   ├── api.py              # OxydeEngine, plugin protocol
+│   └── contrib/            # Example plugins (provisional surface)
+├── docs/plugins.md         # Plugin authoring guide
 ├── docs/specs/             # OMEPs (design decisions)
 ├── .github/workflows/      # CI pipeline
 ├── Cargo.toml              # Rust crate configuration
