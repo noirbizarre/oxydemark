@@ -141,7 +141,31 @@ Notes and constraints on the Python surface:
   consumers; import from `oxydemark` instead.
 * The `Plugin` protocol is structural: plugins are duck-typed and need only
   implement the hooks they use. This is a public, stable contract.
-* Anything not listed in `oxydemark.__all__` is private.
+* Anything not listed in `oxydemark.__all__` is private, with the single
+  documented exception of the provisional `oxydemark.contrib` namespace below.
+
+### Provisional surface: `oxydemark.contrib`
+
+`oxydemark.contrib` is a namespace of **example plugins** shipped with the
+package (admonitions, shortcodes, mentions, lazy images). It exists to
+demonstrate the `Plugin` protocol against a real, tested implementation rather
+than through prose alone.
+
+It sits in a distinct, weaker stability tier:
+
+* It is **public and importable** (`from oxydemark.contrib import
+  AdmonitionPlugin`), documented in `docs/plugins.md`, and covered by tests in
+  `tests/test_contrib.py`.
+* It is **intentionally excluded from `oxydemark.__all__`**, so the frozen core
+  surface stays small and the `tests/test_public_api.py` contract is unaffected.
+* It carries **no stability guarantee**: contrib plugins may change behaviour,
+  change signatures, or be removed in a MINOR bump without being treated as a
+  breaking change to the public API.
+* Contrib plugins must not be a dependency of the core pipeline: `OxydeEngine`
+  never imports them, and removing the whole namespace must leave the frozen
+  surface intact.
+* Consumers who need long-term stability should copy the plugin into their own
+  codebase rather than depend on `oxydemark.contrib`.
 
 ### Typing / stub strategy
 
