@@ -62,6 +62,8 @@ to see the full list.
 | `mise run changelog:preview` | Preview unreleased changelog entries |
 | `mise run cover`        | Generate code coverage report            |
 | `mise run bench`        | Run Python benchmarks                    |
+| `mise run docs`         | Build the docs site and rustdoc reference |
+| `mise run docs:serve`   | Preview the docs site locally            |
 | `mise run setup`        | Install pre-commit hooks                 |
 
 ## Code Style

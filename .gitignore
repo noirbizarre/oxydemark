@@ -33,6 +33,9 @@ ENV/
 # Build artifacts
 *.whl
 
+# Generated documentation site (zensical build + rustdoc)
+/site/
+
 # OS
 .DS_Store
 Thumbs.db

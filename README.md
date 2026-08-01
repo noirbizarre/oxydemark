@@ -6,6 +6,9 @@
 
 Extensible Markdown pipelines powered by Rust.
 
+**[Documentation](https://noirbizarre.github.io/oxydemark/)** |
+**[API reference](https://noirbizarre.github.io/oxydemark/api/)**
+
 ## Overview
 
 OxydeMark is a Markdown processing engine built around an AST pipeline
@@ -93,6 +96,7 @@ mise run test         # Run tests
 mise run lint         # Run clippy
 mise run fmt          # Format code
 mise run ci           # Run all checks
+mise run docs         # Build the documentation site
 ```
 
 ## Project Structure
@@ -108,12 +112,15 @@ oxydemark/
 │   ├── __init__.py         # Re-exports from native module
 │   ├── api.py              # OxydeEngine, plugin protocol
 │   └── contrib/            # Example plugins (provisional surface)
-├── docs/plugins.md         # Plugin authoring guide
-├── docs/specs/             # OMEPs (design decisions)
+├── docs/                   # Documentation site sources
+│   ├── plugins.md          # Plugin authoring guide
+│   ├── api/                # API reference pages
+│   └── specs/              # OMEPs (design decisions)
 ├── .github/workflows/      # CI pipeline
 ├── Cargo.toml              # Rust crate configuration
 ├── pyproject.toml          # Python build config (maturin)
 ├── mise.toml               # Task runner and tool versions
+├── zensical.toml           # Documentation site configuration
 ├── cliff.toml              # Changelog generation
 ├── prek.toml               # Pre-commit hooks
 ├── CONTRIBUTING.md         # Contribution guidelines

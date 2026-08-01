@@ -69,3 +69,23 @@ run = "cargo llvm-cov"
 [tasks.bench]
 description = "Run Python benchmarks comparing Markdown libraries"
 run = "uv run --group bench pytest benchmarks/ --benchmark-only"
+
+[tasks."docs:rust"]
+description = "Generate the rustdoc API reference for the crate"
+run = "cargo doc --no-deps"
+
+[tasks."docs:python"]
+description = "Build the Zensical documentation site into site/"
+run = "uv run --group docs zensical build --clean"
+
+[tasks.docs]
+description = "Build the full documentation site, including the rustdoc reference"
+depends = ["docs:python", "docs:rust"]
+run = [
+  "rm -rf site/rust",
+  "cp -R target/doc site/rust",
+]
+
+[tasks."docs:serve"]
+description = "Serve the documentation site locally with live reload"
+run = "uv run --group docs zensical serve"
