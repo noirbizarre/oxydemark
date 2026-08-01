@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  FORCE_COLOR: 1
   RUSTFLAGS: -Dwarnings
 
 jobs:
@@ -94,8 +95,9 @@ jobs:
 
       - name: Install and smoke-test
         run: |
-          uv pip install --system dist/*.whl
-          python -c "import oxydemark; print(oxydemark.markdown_to_html('hello'))"
+          uv venv /tmp/smoke
+          uv pip install --python /tmp/smoke/bin/python dist/*.whl
+          /tmp/smoke/bin/python -c "import oxydemark; print(oxydemark.markdown_to_html('hello'))"
 
   changelog:
     name: Changelog
