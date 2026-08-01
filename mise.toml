@@ -66,6 +66,13 @@ run = "prek install"
 description = "Generate code coverage report"
 run = "cargo llvm-cov"
 
+[tasks."publish:check"]
+description = "Verify the crate packages cleanly for crates.io (mirrors CI)"
+run = [
+  "cargo package --list --allow-dirty",
+  "cargo publish --dry-run --allow-dirty --locked",
+]
+
 [tasks.bench]
 description = "Run Python benchmarks comparing Markdown libraries"
 run = "uv run --group bench pytest benchmarks/ --benchmark-only"

@@ -64,6 +64,28 @@ jobs:
       - name: Build
         run: cargo build
 
+  package:
+    name: Package (cargo publish --dry-run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Surfaces the exact file list shipped to crates.io -- and, because
+      # maturin's sdist generator reads it, the PyPI sdist file list too
+      # (OMEP-0009).
+      - name: List packaged files
+        run: cargo package --list
+
+      # Full packaging plus a verification build from the packaged tarball, so
+      # a missing `include` entry fails on the pull request rather than on the
+      # release tag.
+      - name: Dry-run publish
+        run: cargo publish --dry-run --locked
+
   python:
     name: Python wheel (${{ matrix.python-version }})
     runs-on: ubuntu-latest

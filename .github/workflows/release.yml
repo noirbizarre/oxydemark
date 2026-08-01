@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    # Unprefixed semver tags only (e.g. `0.2.0`). GitHub's filter syntax
+    # supports `+` as "one or more of the preceding character", so this rejects
+    # stray non-version tags outright.
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
+
+# Trusted Publishing (OMEP-0009, option A2): the workflow mints a short-lived
+# crates.io token from GitHub's OIDC identity. No registry secret is stored.
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_COLOR: 1
+
+jobs:
+  # Gate: the tag, Cargo.toml and pyproject.toml must agree on one version
+  # (OMEP-0008 lockstep versioning). Every publish job hangs off this.
+  version:
+    name: Verify version consistency
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag, Cargo.toml and pyproject.toml agree
+        id: check
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          cargo_version="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          py_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          echo "tag:            $tag"
+          echo "Cargo.toml:     $cargo_version"
+          echo "pyproject.toml: $py_version"
+          if [ "$tag" != "$cargo_version" ] || [ "$tag" != "$py_version" ]; then
+            echo "::error::Version mismatch: tag=$tag Cargo.toml=$cargo_version pyproject.toml=$py_version"
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+  crates-io:
+    name: Publish to crates.io
+    needs: version
+    runs-on: ubuntu-latest
+    # Must match the environment bound to the crates.io Trusted Publisher.
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Exchanges the job's OIDC token for a short-lived crates.io token; the
+      # action's post step revokes it when the job ends.
+      - name: Authenticate with crates.io (Trusted Publishing)
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish crate
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+  # Future jobs belong in this file, all gated on `needs: version`:
+  #   * wheels / sdist / pypi -- issue #25
+  #   * github-release        -- issue #26 (needs job-level `contents: write`)
