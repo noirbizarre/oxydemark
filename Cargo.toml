@@ -1,7 +1,13 @@
 [package]
 name = "oxydemark"
 version = "0.1.0"
+authors = ["Axel H. <noirbizarre@users.noreply.github.com>"]
 edition = "2024"
+# Effective floor: `src/extensions.rs` uses let-chains, stabilised in 1.88
+# (edition 2024 alone would only require 1.85, the `rushdown*` dependencies
+# 1.87). Declaring it gives downstream users a clean resolver error instead of
+# a mid-build type error.
+rust-version = "1.88"
 description = "Extensible Markdown pipelines powered by Rust"
 license = "MIT"
 repository = "https://github.com/noirbizarre/oxydemark"
@@ -9,6 +15,26 @@ documentation = "https://docs.rs/oxydemark"
 readme = "README.md"
 keywords = ["extensible", "markdown", "pipeline", "ast", "pyo3"]
 categories = ["text-processing", "parser-implementations"]
+# Allow-list trimming the published tarball to the sources. Note that `LICENSE`
+# is not shipped automatically (we declare an SPDX `license`, not a
+# `license-file`), hence the explicit entry.
+#
+# CAUTION: maturin's default `sdist-generator = "cargo"` derives the PyPI sdist
+# file list from `cargo package --list`, so `python/**` and `pyproject.toml`
+# must stay included (OMEP-0009).
+include = [
+    "/src/**/*.rs",
+    "/tests/public_api.rs",
+    "/python/**/*.py",
+    "/python/**/*.pyi",
+    "/python/oxydemark/py.typed",
+    "/pyproject.toml",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+]
 
 # docs.rs builds with the default (PyO3-free) feature set, which is exactly the
 # surface downstream crates consume (OMEP-0008 / OMEP-0011).
