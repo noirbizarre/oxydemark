@@ -55,7 +55,7 @@ version) and the CI foundations in OMEP-0005.
 
 * **Option T1: Manual publish** -- Maintainer runs `cargo publish` and
   `maturin publish` locally, ad hoc.
-* **Option T2: Tag-triggered release workflow** -- Pushing a `vX.Y.Z` tag runs
+* **Option T2: Tag-triggered release workflow** -- Pushing an `X.Y.Z` tag runs
   a GitHub Actions workflow that builds, publishes to both indexes, and creates
   the GitHub Release.
 
@@ -88,7 +88,7 @@ Chosen options: **T2 (tag-triggered workflow)**, **A2 (Trusted Publishing)**,
 **W2 (full platform/Python matrix + sdist)**, and **C1 (library-only for
 v0.2.0)**.
 
-Together these define a single `release` workflow, triggered by a `vX.Y.Z` tag,
+Together these define a single `release` workflow, triggered by an `X.Y.Z` tag,
 that authenticates via OIDC, builds the full wheel matrix plus an sdist and the
 crate, publishes them, and cuts a GitHub Release whose body is the git-cliff
 changelog section for that version. v0.2.0 remains library-only; a CLI is
@@ -96,9 +96,9 @@ deferred.
 
 ### Release trigger and versioning
 
-* Releases are cut by pushing an annotated tag of the form `vX.Y.Z` (e.g.
-  `v0.2.0`) to `main`. The tag is the single trigger for the `release`
-  workflow.
+* Releases are cut by pushing an annotated tag of the form `X.Y.Z` (e.g.
+  `0.2.0`, with no `v` prefix) to `main`. The tag is the single trigger for the
+  `release` workflow. `cliff.toml`'s `tag_pattern` matches the same form.
 * Before tagging, the maintainer bumps the version **in lockstep** in both
   `Cargo.toml` and `pyproject.toml` to the same `X.Y.Z` (OMEP-0008). The
   workflow verifies that the two manifest versions and the tag all agree and
@@ -106,7 +106,7 @@ deferred.
 * Version numbers follow the 0.x policy from OMEP-0008: a breaking change to a
   public surface bumps MINOR (`0.1.z -> 0.2.0`); additive/fix changes bump
   PATCH.
-* The GitHub Release notes are generated with `git cliff --tag vX.Y.Z` so the
+* The GitHub Release notes are generated with `git cliff --tag X.Y.Z` so the
   release body matches `CHANGELOG.md` (OMEP-0003). The changelog is not edited
   by hand.
 
@@ -185,7 +185,7 @@ surface has stabilised.
 
 * `ls docs/specs/OMEP-0009-publishing.md` confirms the OMEP exists.
 * A `release` workflow (`.github/workflows/release.yml`) exists and is triggered
-  by `v*` tags.
+  by unprefixed `X.Y.Z` tags.
 * On a pull request, CI runs `cargo publish --dry-run` and `maturin build` so
   packaging regressions are caught before a tag is cut.
 * A version-consistency check fails the release if the tag, `Cargo.toml`, and
@@ -245,4 +245,8 @@ surface has stabilised.
   * Configure Trusted Publishers on crates.io and PyPI.
   * Add `cargo publish --dry-run` and `maturin build`/`maturin sdist` checks to
     the PR CI.
+  * Note: with maturin's default `sdist-generator = "cargo"`, the sdist file
+    list is derived from `cargo package --list`. Any `include`/`exclude` in
+    `[package]` therefore constrains the PyPI sdist as well as the crates.io
+    tarball; `python/**` and `pyproject.toml` must stay included.
   * Author a future OMEP for an `oxydemark` CLI if/when demand justifies it.
