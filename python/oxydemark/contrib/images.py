@@ -1,6 +1,6 @@
-"""Lazy images plugin: add ``loading="lazy"`` to rendered ``<img>`` tags.
+"""Lazy images plugin: add `loading="lazy"` to rendered `<img>` tags.
 
-Demonstrates the ``postprocess`` hook.  This is deliberately *not* an AST
+Demonstrates the `postprocess` hook. This is deliberately *not* an AST
 transform: the change is a pure presentational attribute on the final markup,
 and doing it on the HTML string also covers images that reached the output
 through other plugins (shortcodes, raw HTML nodes, ...).
@@ -12,28 +12,37 @@ import re
 
 __all__ = ["LazyImagesPlugin"]
 
-#: Matches an ``<img`` opening tag and captures its attribute text.
+#: Matches an `<img` opening tag and captures its attribute text.
 _IMG_RE = re.compile(r"<img(?P<attrs>\s[^>]*?)?(?P<close>/?>)", re.IGNORECASE)
 
-#: Detects an already present ``loading`` attribute.
+#: Detects an already present `loading` attribute.
 _LOADING_RE = re.compile(r"\bloading\s*=", re.IGNORECASE)
 
 
 class LazyImagesPlugin:
-    """Add lazy-loading hints to every ``<img>`` that lacks them.
+    """Add lazy-loading hints to every `<img>` that lacks them.
 
-    Parameters
-    ----------
-    decoding:
-        Value for the ``decoding`` attribute, or ``None`` to skip it.
-        Defaults to ``"async"``.
+    Attributes:
+        decoding: The configured `decoding` attribute value.
     """
 
     def __init__(self, decoding: str | None = "async") -> None:
+        """Build the plugin.
+
+        Args:
+            decoding: Value for the `decoding` attribute, or `None` to skip it.
+        """
         self.decoding: str | None = decoding
 
     def postprocess(self, html: str) -> str:
-        """Rewrite ``<img>`` tags, leaving already-annotated ones untouched."""
+        """Rewrite `<img>` tags, leaving already-annotated ones untouched.
+
+        Args:
+            html: The rendered HTML.
+
+        Returns:
+            The HTML with lazy-loading hints added.
+        """
         return _IMG_RE.sub(self._rewrite, html)
 
     def _rewrite(self, match: re.Match[str]) -> str:

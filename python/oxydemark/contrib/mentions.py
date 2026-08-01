@@ -1,16 +1,20 @@
-"""Mention plugin: turn ``@handle`` into a link.
+"""Mention plugin: turn `@handle` into a link.
 
-Demonstrates splitting a ``text`` node into structural nodes (``text`` +
-``link``) rather than injecting raw HTML -- the safer option whenever the
-target markup already has an AST representation.
+Demonstrates splitting a `text` node into structural nodes (`text` + `link`)
+rather than injecting raw HTML -- the safer option whenever the target markup
+already has an AST representation.
 
-Input::
+Input:
 
-    Ping @alice about it.
+```markdown
+Ping @alice about it.
+```
 
-Output::
+Output:
 
-    <p>Ping <a href="https://github.com/alice" class="mention">@alice</a> about it.</p>
+```html
+<p>Ping <a href="https://github.com/alice" class="mention">@alice</a> about it.</p>
+```
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ from oxydemark.contrib._text import rewrite_text_nodes
 
 __all__ = ["MentionPlugin"]
 
-#: Matches ``@handle`` when not preceded by a word character (avoids emails).
+#: Matches `@handle` when not preceded by a word character (avoids emails).
 _MENTION_RE = re.compile(r"(?<![\w@/-])@(?P<handle>[A-Za-z0-9][A-Za-z0-9-]{0,38})\b")
 
 #: Node kinds whose subtree must be left verbatim (already a link, or code).
@@ -30,24 +34,34 @@ _OPAQUE_KINDS = frozenset({"code_block", "code_span", "html_block", "link", "raw
 
 
 class MentionPlugin:
-    """Linkify ``@handle`` mentions found in text nodes.
+    """Linkify `@handle` mentions found in text nodes.
 
-    Parameters
-    ----------
-    base_url:
-        Prefix the handle is appended to. Defaults to ``https://github.com/``.
+    Attributes:
+        base_url: The prefix handles are appended to.
     """
 
     def __init__(self, base_url: str = "https://github.com/") -> None:
+        """Build the plugin.
+
+        Args:
+            base_url: Prefix the handle is appended to.
+        """
         self.base_url: str = base_url
 
     def transform(self, ast: AstNode) -> AstNode:
-        """Replace mentions found in ``text`` nodes with ``link`` nodes."""
+        """Replace mentions found in `text` nodes with `link` nodes.
+
+        Args:
+            ast: The root of the parsed tree.
+
+        Returns:
+            The rewritten tree.
+        """
         rewrite_text_nodes(ast, opaque_kinds=_OPAQUE_KINDS, split=self._split)
         return ast
 
     def _split(self, text: str) -> list[AstNode]:
-        """Split ``text`` into ``text``/``link`` nodes around mentions."""
+        """Split a run of text into `text`/`link` nodes around mentions."""
         nodes: list[AstNode] = []
         cursor = 0
         for match in _MENTION_RE.finditer(text):
@@ -62,7 +76,7 @@ class MentionPlugin:
         return nodes
 
     def _link(self, handle: str) -> AstNode:
-        """Build the ``<a class="mention">`` node for a handle."""
+        """Build the `<a class="mention">` node for a handle."""
         return AstNode(
             kind="link",
             children=[AstNode(kind="text", text=f"@{handle}")],

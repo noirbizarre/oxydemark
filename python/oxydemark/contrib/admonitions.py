@@ -1,28 +1,31 @@
-"""Admonition plugin: GitHub-style alerts rendered as ``<div class="admonition">``.
+"""Admonition plugin: GitHub-style alerts rendered as `<div class="admonition">`.
 
-Demonstrates the ``preprocess`` and ``transform`` hooks working together.
+Demonstrates the `preprocess` and `transform` hooks working together.
 
-Input::
+Input:
 
-    > [!NOTE]
-    > Useful information.
+```markdown
+> [!NOTE]
+> Useful information.
+```
 
-Output::
+Output:
 
-    <div class="admonition admonition-note">
-    <div class="admonition-title">Note</div>
-    <p>Useful information.</p>
-    </div>
+```html
+<div class="admonition admonition-note">
+<div class="admonition-title">Note</div>
+<p>Useful information.</p>
+</div>
+```
 
-Why two hooks?
---------------
-The ``[!NOTE]`` marker cannot be reliably detected in the AST: the parser
-splits it into three separate ``text`` nodes (``"["``, ``"!NOTE"``, ``"]"``)
-because it looks like a link reference.  Detection therefore happens at the
-**text** layer (``preprocess``), which rewrites the blockquote into a Comark
-``:::note`` block component.  Styling the resulting node -- adding classes and
-a title -- is a structural concern and happens at the **AST** layer
-(``transform``).
+## Why two hooks?
+
+The `[!NOTE]` marker cannot be reliably detected in the AST: the parser splits
+it into three separate `text` nodes (`"["`, `"!NOTE"`, `"]"`) because it looks
+like a link reference. Detection therefore happens at the **text** layer
+(`preprocess`), which rewrites the blockquote into a Comark `:::note` block
+component. Styling the resulting node -- adding classes and a title -- is a
+structural concern and happens at the **AST** layer (`transform`).
 """
 
 from __future__ import annotations
@@ -37,7 +40,8 @@ if TYPE_CHECKING:
 
 __all__ = ["AdmonitionPlugin"]
 
-#: Default markers recognised by :class:`AdmonitionPlugin`, mapped to their title.
+#: Default markers recognised by [`AdmonitionPlugin`][oxydemark.contrib.AdmonitionPlugin],
+#: mapped to their title.
 DEFAULT_KINDS: Mapping[str, str] = {
     "note": "Note",
     "tip": "Tip",
@@ -46,29 +50,41 @@ DEFAULT_KINDS: Mapping[str, str] = {
     "caution": "Caution",
 }
 
-#: Matches an alert opener such as ``> [!NOTE]`` (optionally indented).
+#: Matches an alert opener such as `> [!NOTE]` (optionally indented).
 _ALERT_RE = re.compile(r"^ {0,3}> ?\[!(?P<kind>[A-Za-z]+)\] *$")
 
-#: Matches a blockquote continuation line, capturing the content after ``> ``.
+#: Matches a blockquote continuation line, capturing the content after `> `.
 _QUOTE_RE = re.compile(r"^ {0,3}> ?(?P<content>.*)$")
 
 
 class AdmonitionPlugin:
     """Turn GitHub-style alerts into styled admonition blocks.
 
-    Parameters
-    ----------
-    kinds:
-        Mapping of lowercase marker name to the title rendered in the
-        admonition header.  Defaults to :data:`DEFAULT_KINDS`.  Markers absent
-        from this mapping are left untouched as ordinary blockquotes.
+    Attributes:
+        kinds: The active marker-to-title mapping.
     """
 
     def __init__(self, kinds: Mapping[str, str] | None = None) -> None:
+        """Build the plugin.
+
+        Args:
+            kinds: Mapping of lowercase marker name to the title rendered in
+                the admonition header. Defaults to
+                [`DEFAULT_KINDS`][oxydemark.contrib.admonitions.DEFAULT_KINDS].
+                Markers absent from this mapping are left untouched as ordinary
+                blockquotes.
+        """
         self.kinds: dict[str, str] = dict(kinds) if kinds is not None else dict(DEFAULT_KINDS)
 
     def preprocess(self, markdown: str) -> str:
-        """Rewrite ``> [!KIND]`` blockquotes into Comark ``:::kind`` fences."""
+        """Rewrite `> [!KIND]` blockquotes into Comark `:::kind` fences.
+
+        Args:
+            markdown: The Markdown source to rewrite.
+
+        Returns:
+            The Markdown source with alerts turned into block components.
+        """
         lines = markdown.split("\n")
         out: list[str] = []
         index = 0
@@ -93,7 +109,14 @@ class AdmonitionPlugin:
         return "\n".join(out)
 
     def transform(self, ast: AstNode) -> AstNode:
-        """Add admonition classes and a title node to admonition components."""
+        """Add admonition classes and a title node to admonition components.
+
+        Args:
+            ast: The root of the parsed tree.
+
+        Returns:
+            The decorated tree.
+        """
         self._decorate(ast)
         return ast
 
@@ -117,7 +140,7 @@ class AdmonitionPlugin:
 
 
 def _title_node(title: str) -> AstNode:
-    """Build the ``<div class="admonition-title">`` header node."""
+    """Build the `<div class="admonition-title">` header node."""
     return AstNode(
         kind="block_component",
         children=[AstNode(kind="text", text=title)],
