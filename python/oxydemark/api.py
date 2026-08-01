@@ -18,6 +18,42 @@ class Plugin(Protocol):
     - ``postprocess``: transform rendered HTML after rendering.
 
     All hooks are optional; implement only the ones you need.
+
+    The protocol is **structural** and hooks are dispatched by
+    :func:`hasattr`, never by :func:`isinstance`.  A plugin therefore does not
+    need to inherit from or register with anything -- any object exposing at
+    least one correctly named hook is a valid plugin.
+
+    Hook ordering
+    -------------
+    :class:`OxydeEngine` runs *one phase at a time* across the whole plugin
+    list, not one plugin at a time.  For plugins ``[A, B]`` the call order is
+    ``A.preprocess``, ``B.preprocess``, parse, ``A.transform``,
+    ``B.transform``, render, ``A.postprocess``, ``B.postprocess``.
+
+    Choosing the right hook
+    -----------------------
+    ==============  =====================  =====================================
+    Hook            Operates on            Use it when
+    ==============  =====================  =====================================
+    ``preprocess``  raw Markdown ``str``   the construct is not representable in
+                                           the AST yet (custom markers, macros,
+                                           includes, front-matter tweaks).
+    ``transform``   :class:`AstNode` tree  you need structure: adding, removing,
+                                           re-typing or annotating nodes.
+    ``postprocess`` rendered HTML ``str``  the change is purely presentational
+                                           and applies to the final markup.
+    ==============  =====================  =====================================
+
+    Escaping rules worth knowing:
+
+    - ``AstNode.text`` is **HTML-escaped** by the renderer.
+    - Raw HTML present in the *source* Markdown is **stripped**.
+    - A node of kind ``"raw_html"`` emits its ``text`` **verbatim**; it is the
+      only supported way to inject markup from a ``transform`` hook.
+
+    See :mod:`oxydemark.contrib` for worked examples and ``docs/plugins.md``
+    for the full authoring guide.
     """
 
     def preprocess(self, markdown: str) -> str:
@@ -28,23 +64,34 @@ class Plugin(Protocol):
         """Transform the AST *between* parsing and rendering.
 
         Receives the full AST tree and must return the (possibly modified)
-        tree.  Use recursive traversal with explicit reassignment to modify
-        the tree in place (PyO3 value semantics require reassigning
-        ``children`` after modification):
+        tree.
 
-        .. code-block:: python
+        .. important::
+           :class:`AstNode` has **value semantics**.  ``node.children`` is a
+           PyO3 getter that returns a *fresh copy* of the child list, and each
+           element in it is a copy too.  Consequently::
 
-            def transform(self, ast):
-                self._modify(ast)
-                return ast
+               node.children[0].text = "x"   # silently discarded
+               node.children.append(other)   # silently discarded
 
-            def _modify(self, node):
-                if node.kind == "text" and node.text:
-                    node.text = node.text.replace("@", "<span>@</span>")
-                children = node.children
-                for child in children:
-                    self._modify(child)
-                node.children = children
+           Mutations must be applied to a local copy which is then reassigned::
+
+               def transform(self, ast):
+                   self._modify(ast)
+                   return ast
+
+               def _modify(self, node):
+                   if node.kind == "text" and node.text:
+                       node.text = node.text.upper()
+                   children = node.children      # copy out
+                   for child in children:
+                       self._modify(child)
+                   node.children = children      # write back -- mandatory
+
+           The same applies to :meth:`AstNode.walk`, which yields copies:
+           it is useful for *inspection* only, never for mutation.
+
+        See :mod:`oxydemark.contrib` for complete, tested examples.
         """
         return ast
 
