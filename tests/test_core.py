@@ -545,6 +545,74 @@ class TestBlockComponents:
         nodes = ast.walk()
         assert all(n.kind != "block_component" for n in nodes)
 
+    def _block_component(self, ast):
+        return next(n for n in ast.walk() if n.kind == "block_component")
+
+    def test_props_none_by_default(self):
+        ast = oxydemark.parse("::note\nContent\n::")
+        assert self._block_component(ast).props is None
+
+    def test_props_none_when_inline_only(self):
+        ast = oxydemark.parse("::note{.info}\nBody\n::")
+        bc = self._block_component(ast)
+        assert bc.props is None
+        assert bc.attributes["class"] == "info"
+
+    def test_props_frontmatter_style_native_types(self):
+        ast = oxydemark.parse(
+            "::card\n---\nvariant: elevated\ncount: 42\nenabled: true\n---\nBody\n::"
+        )
+        props = self._block_component(ast).props
+        assert props is not None
+        assert props["variant"] == "elevated"
+        assert props["count"] == 42
+        assert isinstance(props["count"], int)
+        assert not isinstance(props["count"], bool)
+        assert props["enabled"] is True
+
+    def test_props_codeblock_style(self):
+        ast = oxydemark.parse(
+            "::card\n```yaml [props]\nvariant: elevated\ncount: 42\n```\nBody\n::"
+        )
+        props = self._block_component(ast).props
+        assert props is not None
+        assert props["variant"] == "elevated"
+        assert props["count"] == 42
+
+    def test_props_typed_sequences_and_mappings(self):
+        ast = oxydemark.parse(
+            "::card\n---\ntags:\n  - a\n  - b\nobj:\n  k: v\n---\n::"
+        )
+        props = self._block_component(ast).props
+        assert props is not None
+        assert props["tags"] == ["a", "b"]
+        assert props["obj"] == {"k": "v"}
+
+    def test_props_inline_attribute_takes_precedence(self):
+        ast = oxydemark.parse(
+            '::card{variant="inline"}\n---\nvariant: yaml\ntitle: T\n---\n::'
+        )
+        bc = self._block_component(ast)
+        # Inline attribute wins and lives in `attributes`.
+        assert bc.attributes["variant"] == "inline"
+        # The colliding key is dropped from typed props.
+        assert bc.props is not None
+        assert "variant" not in bc.props
+        assert bc.props["title"] == "T"
+
+    def test_props_is_read_only(self):
+        ast = oxydemark.parse("::card\n---\nvariant: x\n---\n::")
+        bc = self._block_component(ast)
+        with pytest.raises(AttributeError):
+            bc.props = {"other": 1}
+
+    def test_props_not_emitted_as_html(self):
+        html = oxydemark.markdown_to_html(
+            "::card{.featured}\n---\ntitle: Secret\n---\nBody\n::"
+        )
+        assert 'class="featured"' in html
+        assert "title" not in html
+
 
 # ---------------------------------------------------------------------------
 # Comark: inline components

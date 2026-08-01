@@ -30,10 +30,12 @@ use crate::extensions::{BlockComponent, InlineComponent, Slot, SpanAttributes};
 ///     if node.kind == "text":
 ///         print(node.text)
 /// ```
-// `get_all`/`set_all` are applied on the `#[pyclass]` attribute (rather than a
-// per-field `#[pyo3(get, set)]`) because a field-level `#[pyo3(...)]` helper
-// attribute cannot be gated with `#[cfg_attr]` in PyO3 0.28.
-#[cfg_attr(feature = "python", pyclass(get_all, set_all, from_py_object))]
+// Field accessors are defined as explicit `#[getter]`/`#[setter]` methods in the
+// `python`-gated `#[pymethods]` block below (rather than `get_all`/`set_all` on
+// the `#[pyclass]` attribute) so that the typed `props` field can be exposed as
+// a native Python `dict` via a computed getter, mirroring
+// [`ParseResult::frontmatter`].
+#[cfg_attr(feature = "python", pyclass(from_py_object))]
 #[derive(Clone, Debug)]
 pub struct AstNode {
     /// The node kind (e.g. "document", "paragraph", "text", "heading").
@@ -57,6 +59,16 @@ pub struct AstNode {
     /// in a pre-1.0 release. Use [`crate::parse_document`] and
     /// `ParseResult.frontmatter` for typed access.
     pub metadata: Option<HashMap<String, String>>,
+
+    /// Typed block-component props from a leading YAML block (OMEP-0007).
+    ///
+    /// Present (a [`ast::Meta::Mapping`]) only on `block_component` nodes that
+    /// declare a leading YAML block, and `None` otherwise. Unlike
+    /// [`AstNode::attributes`], values preserve their native YAML types
+    /// (numbers, booleans, sequences, mappings). Inline `{…}` attributes take
+    /// precedence: keys that also appear as inline attributes are dropped from
+    /// `props`. The Python binding exposes this as a read-only `dict`.
+    pub props: Option<ast::Meta>,
 }
 
 impl AstNode {
@@ -78,6 +90,7 @@ impl AstNode {
             text,
             attributes,
             metadata,
+            props: None,
         }
     }
 
@@ -138,6 +151,86 @@ impl AstNode {
             attributes.unwrap_or_default(),
             metadata,
         )
+    }
+
+    /// The node kind.
+    #[getter]
+    fn get_kind(&self) -> String {
+        self.kind.clone()
+    }
+
+    #[setter]
+    fn set_kind(&mut self, value: String) {
+        self.kind = value;
+    }
+
+    /// Child nodes.
+    #[getter]
+    fn get_children(&self) -> Vec<AstNode> {
+        self.children.clone()
+    }
+
+    #[setter]
+    fn set_children(&mut self, value: Vec<AstNode>) {
+        self.children = value;
+    }
+
+    /// Text content for leaf nodes.
+    #[getter]
+    fn get_text(&self) -> Option<String> {
+        self.text.clone()
+    }
+
+    #[setter]
+    fn set_text(&mut self, value: Option<String>) {
+        self.text = value;
+    }
+
+    /// HTML attributes attached to this node.
+    #[getter]
+    fn get_attributes(&self) -> HashMap<String, String> {
+        self.attributes.clone()
+    }
+
+    #[setter]
+    fn set_attributes(&mut self, value: HashMap<String, String>) {
+        self.attributes = value;
+    }
+
+    /// Deprecated stringly-typed YAML frontmatter (document node only).
+    #[getter]
+    fn get_metadata(&self) -> Option<HashMap<String, String>> {
+        self.metadata.clone()
+    }
+
+    #[setter]
+    fn set_metadata(&mut self, value: Option<HashMap<String, String>>) {
+        self.metadata = value;
+    }
+
+    /// Typed block-component props as a Python `dict`, or `None` (read-only).
+    ///
+    /// Values preserve their native YAML types (`str`, `int`, `float`, `bool`,
+    /// `list`, `dict`, `None`). This attribute has no setter.
+    #[getter]
+    fn get_props(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
+        match &self.props {
+            None => Ok(None),
+            Some(ast::Meta::Mapping(map)) => {
+                let dict = PyDict::new(py);
+                for (k, v) in map.iter() {
+                    dict.set_item(k, meta_to_py(py, v)?)?;
+                }
+                Ok(Some(dict.unbind()))
+            }
+            // `props` is always a mapping when set; be defensive rather than
+            // panicking for any other shape.
+            Some(other) => {
+                let dict = PyDict::new(py);
+                dict.set_item("value", meta_to_py(py, other)?)?;
+                Ok(Some(dict.unbind()))
+            }
+        }
     }
 
     /// Walk the AST tree depth-first, returning a flat list of all nodes.
@@ -456,6 +549,41 @@ fn node_attributes(node: &ast::Node, source: &str) -> HashMap<String, String> {
     attrs
 }
 
+/// Extract a block component's typed YAML props, if any (OMEP-0007).
+///
+/// Only `block_component` nodes carry props. Inline `{…}` attributes take
+/// precedence: any prop key that also appears as an inline attribute
+/// (`node.attributes()`) is dropped. Returns `None` when the node has no props
+/// or every prop key collided with an inline attribute.
+fn node_props(node: &ast::Node) -> Option<ast::Meta> {
+    let KindData::Extension(ext) = node.kind_data() else {
+        return None;
+    };
+    let bc = (ext.as_ref() as &dyn std::any::Any).downcast_ref::<BlockComponent>()?;
+    let ast::Meta::Mapping(map) = bc.props.as_ref()? else {
+        return None;
+    };
+
+    // Inline attribute keys (the rushdown attribute map, excluding the
+    // synthetic "name" injected during AstNode conversion).
+    let inline: std::collections::HashSet<&str> =
+        node.attributes().iter().map(|(k, _)| k.as_str()).collect();
+
+    let mut filtered = rushdown::util::StringMap::default();
+    for (key, value) in map.iter() {
+        if inline.contains(key.as_str()) {
+            continue;
+        }
+        filtered.insert(key.clone(), value.clone());
+    }
+
+    if filtered.is_empty() {
+        None
+    } else {
+        Some(ast::Meta::Mapping(filtered))
+    }
+}
+
 /// Convert a rushdown arena AST rooted at `node_ref` into an `AstNode` tree.
 ///
 /// Text nodes with soft/hard line break qualifiers are split into the text
@@ -465,6 +593,7 @@ pub(crate) fn arena_to_ast_node(arena: &ast::Arena, node_ref: NodeRef, source: &
     let kind = kind_name(node).to_string();
     let text = node_text(node, source);
     let attributes = node_attributes(node, source);
+    let props = node_props(node);
 
     // Extract metadata from the document node (rushdown-meta).
     let metadata = if let KindData::Document(_) = node.kind_data() {
@@ -498,6 +627,7 @@ pub(crate) fn arena_to_ast_node(arena: &ast::Arena, node_ref: NodeRef, source: &
                 text: None,
                 attributes: HashMap::new(),
                 metadata: None,
+                props: None,
             });
         } else if is_hardbreak(child_node) {
             children.push(AstNode {
@@ -506,6 +636,7 @@ pub(crate) fn arena_to_ast_node(arena: &ast::Arena, node_ref: NodeRef, source: &
                 text: None,
                 attributes: HashMap::new(),
                 metadata: None,
+                props: None,
             });
         }
 
@@ -518,6 +649,7 @@ pub(crate) fn arena_to_ast_node(arena: &ast::Arena, node_ref: NodeRef, source: &
         text,
         attributes,
         metadata,
+        props,
     }
 }
 

@@ -18,6 +18,13 @@ class AstNode:
     #: Deprecated (OMEP-0010): stringly-typed frontmatter, retained for backward
     #: compatibility. Use ``parse_document(...).frontmatter`` for typed access.
     metadata: dict[str, str] | None
+    #: Typed block-component props from a leading YAML block (OMEP-0007), or
+    #: ``None``. Present only on ``block_component`` nodes that declare a YAML
+    #: block. Values preserve their native YAML types (``str``, ``int``,
+    #: ``float``, ``bool``, ``list``, ``dict``, ``None``). Inline ``{…}``
+    #: attributes take precedence on key collisions. Read-only.
+    @property
+    def props(self) -> dict[str, object] | None: ...
 
     def __init__(
         self,

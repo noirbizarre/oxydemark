@@ -8,11 +8,11 @@
 //! Each extension includes an AST node type, a rushdown parser extension,
 //! and a rushdown HTML renderer extension.
 
+use std::cell::RefCell;
 use std::fmt;
 
 use std::collections::HashSet;
 
-use rushdown::as_type_data;
 use rushdown::ast::{
     self, Arena, BlockText, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, pp_indent,
 };
@@ -25,7 +25,9 @@ use rushdown::renderer::{
     RenderNode, TextWrite,
 };
 use rushdown::text::{self, Reader};
+use rushdown::{as_kind_data, as_type_data};
 use rushdown_emoji::Emoji;
+use rushdown_meta::{MetaParserOptions, meta_parser_extension};
 
 use crate::html_render::html_escape;
 
@@ -41,6 +43,12 @@ use crate::html_render::html_escape;
 #[derive(Debug)]
 pub(crate) struct BlockComponent {
     pub(crate) name: String,
+    /// Typed block props parsed from a leading YAML block (OMEP-0007).
+    ///
+    /// Always a [`ast::Meta::Mapping`] when `Some`, or `None` when the component
+    /// declares no YAML props. Precedence against inline `{…}` attributes is
+    /// resolved during AST conversion (see `src/ast.rs`).
+    pub(crate) props: Option<ast::Meta>,
 }
 
 impl NodeKind for BlockComponent {
@@ -55,7 +63,11 @@ impl NodeKind for BlockComponent {
 
 impl PrettyPrint for BlockComponent {
     fn pretty_print(&self, w: &mut dyn fmt::Write, _source: &str, level: usize) -> fmt::Result {
-        writeln!(w, "{}name: {}", pp_indent(level), self.name)
+        writeln!(w, "{}name: {}", pp_indent(level), self.name)?;
+        if let Some(ast::Meta::Mapping(map)) = &self.props {
+            writeln!(w, "{}props: {}", pp_indent(level), map.len())?;
+        }
+        Ok(())
     }
 }
 
@@ -214,16 +226,23 @@ impl BlockParser for BlockComponentParser {
             return None;
         }
 
-        let node_ref = arena.new_node(BlockComponent {
-            name: name.to_string(),
-        });
+        // We commit to opening the component here. Copy out the borrowed slices
+        // before advancing the reader (which invalidates `line`).
+        let name = name.to_string();
+        let attr_str = attr_str.map(str::to_string);
 
-        // Parse and attach attributes.
+        // Consume the opening `::name{…}` line, then an optional leading YAML
+        // props block that must appear immediately after it (OMEP-0007).
+        reader.advance_line();
+        let props = consume_block_props(reader).and_then(|body| parse_props_yaml(&body));
+
+        let node_ref = arena.new_node(BlockComponent { name, props });
+
+        // Parse and attach inline attributes.
         if let Some(attrs) = attr_str {
-            parse_component_attributes(attrs, &mut arena[node_ref]);
+            parse_component_attributes(&attrs, &mut arena[node_ref]);
         }
 
-        reader.advance_line();
         Some((node_ref, State::HAS_CHILDREN))
     }
 
@@ -262,6 +281,144 @@ pub(crate) fn block_component_parser_extension() -> impl ParserExtension {
             650,
         );
     })
+}
+
+// ---------------------------------------------------------------------------
+// Block component YAML props
+// ---------------------------------------------------------------------------
+
+/// Build a minimal rushdown parser that only understands YAML frontmatter.
+///
+/// Used to type a component's leading YAML block by reusing the
+/// `rushdown-meta` code path (see [`parse_props_yaml`]).
+fn build_props_parser() -> Parser {
+    let extensions = meta_parser_extension(MetaParserOptions::default());
+    Parser::with_extensions(parser::Options::default(), extensions)
+}
+
+thread_local! {
+    /// Lazily-constructed, thread-local YAML-props parser.
+    ///
+    /// Kept separate from the main document parser so it only carries the
+    /// frontmatter extension, and cached to avoid rebuilding it per component.
+    static PROPS_PARSER: RefCell<Parser> = RefCell::new(build_props_parser());
+}
+
+/// Parse a raw YAML body into a typed [`ast::Meta`] mapping.
+///
+/// The body is wrapped as a synthetic `---\n{body}\n---\n` document and parsed
+/// with the frontmatter-only [`PROPS_PARSER`], reusing the `rushdown-meta`
+/// typing path. Returns `None` on parse failure, empty metadata, or a
+/// non-mapping top-level value.
+fn parse_props_yaml(body: &str) -> Option<ast::Meta> {
+    let source = format!("---\n{body}\n---\n");
+    PROPS_PARSER.with(|parser| {
+        let parser = parser.borrow();
+        let mut reader = text::BasicReader::new(&source);
+        let (arena, document_ref) = parser.parse(&mut reader);
+        let meta = as_kind_data!(arena, document_ref, Document).metadata();
+        if meta.is_empty() {
+            None
+        } else {
+            Some(ast::Meta::Mapping(meta.clone()))
+        }
+    })
+}
+
+/// Consume a leading YAML props block from a block-component body.
+///
+/// The `reader` must be positioned on the first line *after* the opening
+/// `::name` line. Two block styles are recognized (OMEP-0007):
+///
+/// * `---`-delimited frontmatter, and
+/// * a fenced code block whose info string is exactly `yaml [props]`.
+///
+/// The block must appear *immediately* after the opening line: a blank first
+/// line yields `None`. On a well-formed block the raw body (without the
+/// delimiters/fence) is returned and the reader is advanced past the closing
+/// delimiter. When no block is present or the block is unterminated, the reader
+/// position is restored and `None` is returned.
+fn consume_block_props(reader: &mut text::BasicReader) -> Option<String> {
+    let saved = reader.position();
+
+    let (line_bytes, _seg) = reader.peek_line_bytes()?;
+    let line = std::str::from_utf8(&line_bytes).ok()?;
+    let trimmed = line.trim();
+
+    let closing: ClosingMarker = if trimmed == "---" {
+        ClosingMarker::Frontmatter
+    } else if is_yaml_props_fence(trimmed) {
+        ClosingMarker::Fence
+    } else {
+        // No leading YAML block (includes a blank first line).
+        return None;
+    };
+
+    // Consume the opening delimiter/fence line.
+    reader.advance_line();
+
+    let mut body = String::new();
+    loop {
+        let Some((line_bytes, _seg)) = reader.peek_line_bytes() else {
+            // Reached EOF without a closing delimiter: not a props block.
+            reader.set_position(saved.0, saved.1);
+            return None;
+        };
+        let Ok(line) = std::str::from_utf8(&line_bytes) else {
+            reader.set_position(saved.0, saved.1);
+            return None;
+        };
+        let trimmed = line.trim();
+
+        // A bare `::` closes the component before the block terminates.
+        if trimmed == "::" {
+            reader.set_position(saved.0, saved.1);
+            return None;
+        }
+
+        let is_close = match closing {
+            ClosingMarker::Frontmatter => trimmed == "---",
+            ClosingMarker::Fence => trimmed == "```",
+        };
+        if is_close {
+            reader.advance_line();
+            return Some(body);
+        }
+
+        body.push_str(line);
+        if !line.ends_with('\n') {
+            body.push('\n');
+        }
+        reader.advance_line();
+    }
+}
+
+/// The delimiter that terminates a leading YAML props block.
+enum ClosingMarker {
+    /// A `---` frontmatter block, closed by another `---` line.
+    Frontmatter,
+    /// A ```` ```yaml [props] ```` fenced block, closed by a ```` ``` ```` line.
+    Fence,
+}
+
+/// Return `true` if `trimmed` is an opening ```` ```yaml [props] ```` fence.
+///
+/// The info string must be exactly `yaml [props]` (a single space is tolerated
+/// as arbitrary internal whitespace). A plain ```` ```yaml ```` block is *not*
+/// a props fence and is left to normal parsing as component content.
+fn is_yaml_props_fence(trimmed: &str) -> bool {
+    let Some(info) = trimmed.strip_prefix("```") else {
+        return false;
+    };
+    // Reject longer/mismatched fences like ```` ```` ```` handled elsewhere.
+    if info.starts_with('`') {
+        return false;
+    }
+    let mut tokens = info.split_whitespace();
+    matches!(
+        (tokens.next(), tokens.next(), tokens.next()),
+        (Some("yaml"), Some("[props]"), None)
+    )
 }
 
 // ---------------------------------------------------------------------------

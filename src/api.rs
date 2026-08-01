@@ -201,6 +201,7 @@ pub fn extract_summary(markdown: &str) -> Option<String> {
             text: None,
             attributes: std::collections::HashMap::new(),
             metadata: None,
+            props: None,
         };
         Some(render_ast_to_html(&summary_doc))
     })
@@ -611,6 +612,7 @@ mod tests {
             text: None,
             attributes: HashMap::new(),
             metadata: None,
+            props: None,
         };
         assert_eq!(node.kind, "test");
         assert!(node.children.is_empty());
@@ -653,6 +655,7 @@ mod tests {
             text: Some("hello".to_string()),
             attributes: HashMap::new(),
             metadata: None,
+            props: None,
         };
         let repr = node.repr_string();
         assert!(repr.contains("text"));
@@ -669,10 +672,12 @@ mod tests {
                 text: None,
                 attributes: HashMap::new(),
                 metadata: None,
+                props: None,
             }],
             text: None,
             attributes: HashMap::new(),
             metadata: None,
+            props: None,
         };
         let repr = node.repr_string();
         assert!(repr.contains("document"));
@@ -861,6 +866,175 @@ mod tests {
         assert!(
             !bc.children.is_empty(),
             "Block component should have children"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Comark: in-component YAML props (OMEP-0007 Phase 3)
+    // -----------------------------------------------------------------------
+
+    use rushdown::ast::Meta;
+
+    /// Return the top-level `props` mapping of the first `block_component`.
+    fn component_props(input: &str) -> Option<rushdown::util::StringMap<Meta>> {
+        let ast = parse(input);
+        let bc = find_block_component(&ast);
+        match &bc.props {
+            Some(Meta::Mapping(map)) => Some(map.clone()),
+            None => None,
+            other => panic!("expected mapping props, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_block_component_props_frontmatter_style() {
+        let input =
+            "::card\n---\nvariant: elevated\ncount: 42\nenabled: true\n---\nCard content\n::";
+        let props = component_props(input).expect("expected props");
+        assert_eq!(props.get("variant"), Some(&Meta::String("elevated".into())));
+        assert_eq!(props.get("count"), Some(&Meta::Int(42)));
+        assert_eq!(props.get("enabled"), Some(&Meta::Bool(true)));
+
+        // Body content is preserved as children (props were consumed).
+        let ast = parse(input);
+        let bc = find_block_component(&ast);
+        assert!(
+            bc.children.iter().any(|c| c.kind == "paragraph"),
+            "expected body paragraph, got: {:?}",
+            bc.children.iter().map(|c| &c.kind).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn parse_block_component_props_codeblock_style() {
+        let input = "::card\n```yaml [props]\nvariant: elevated\ncount: 42\n```\nCard content\n::";
+        let props = component_props(input).expect("expected props");
+        assert_eq!(props.get("variant"), Some(&Meta::String("elevated".into())));
+        assert_eq!(props.get("count"), Some(&Meta::Int(42)));
+    }
+
+    #[test]
+    fn parse_block_component_props_none_when_inline_only() {
+        let input = "::note{.info}\nBody\n::";
+        assert!(component_props(input).is_none());
+        let ast = parse(input);
+        let bc = find_block_component(&ast);
+        assert_eq!(bc.attributes.get("class").map(|v| v.as_str()), Some("info"));
+    }
+
+    #[test]
+    fn parse_block_component_props_typed_values() {
+        let input = "::card\n---\ntags:\n  - a\n  - b\nobj:\n  k: v\n---\n::";
+        let props = component_props(input).expect("expected props");
+        assert_eq!(
+            props.get("tags"),
+            Some(&Meta::Sequence(vec![
+                Meta::String("a".into()),
+                Meta::String("b".into()),
+            ]))
+        );
+        match props.get("obj") {
+            Some(Meta::Mapping(inner)) => {
+                assert_eq!(inner.get("k"), Some(&Meta::String("v".into())));
+            }
+            other => panic!("expected nested mapping, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_block_component_props_precedence_drops_colliding_key() {
+        let input = "::card{variant=\"inline\"}\n---\nvariant: yaml\ntitle: T\n---\n::";
+        let ast = parse(input);
+        let bc = find_block_component(&ast);
+        // Inline attribute wins and lives in `attributes`.
+        assert_eq!(
+            bc.attributes.get("variant").map(|v| v.as_str()),
+            Some("inline")
+        );
+        // The colliding key is dropped from typed props; non-colliding remains.
+        let props = component_props(input).expect("expected props");
+        assert!(props.get("variant").is_none());
+        assert_eq!(props.get("title"), Some(&Meta::String("T".into())));
+    }
+
+    #[test]
+    fn parse_block_component_props_all_collide_yields_none() {
+        let input = "::card{variant=\"inline\"}\n---\nvariant: yaml\n---\n::";
+        assert!(component_props(input).is_none());
+    }
+
+    #[test]
+    fn parse_block_component_no_props_unaffected() {
+        let input = "::note\nContent\n::";
+        let ast = parse(input);
+        let bc = find_block_component(&ast);
+        assert!(bc.props.is_none());
+        assert!(!bc.children.is_empty());
+    }
+
+    #[test]
+    fn parse_block_component_props_malformed_yaml_graceful() {
+        // Malformed YAML must not panic; props end up absent.
+        let input = "::card\n---\n: : bad\n---\n::";
+        let _ = parse(input); // no panic
+        assert!(component_props(input).is_none());
+    }
+
+    #[test]
+    fn parse_block_component_props_unterminated_falls_back() {
+        // No closing `---` before the component closes: treat as content.
+        let input = "::card\n---\nvariant: x\n::";
+        let ast = parse(input);
+        let bc = find_block_component(&ast);
+        assert!(bc.props.is_none());
+        assert!(
+            !bc.children.is_empty(),
+            "unterminated block should become content"
+        );
+    }
+
+    #[test]
+    fn parse_block_component_props_blank_line_not_props() {
+        // A blank line before `---` means no props block (must be immediate).
+        let input = "::card\n\n---\nvariant: x\n---\n::";
+        assert!(component_props(input).is_none());
+    }
+
+    #[test]
+    fn parse_block_component_plain_yaml_fence_is_content() {
+        // A plain ```yaml block (no [props]) is component content, not props.
+        let input = "::card\n```yaml\nvariant: x\n```\n::";
+        let ast = parse(input);
+        let bc = find_block_component(&ast);
+        assert!(bc.props.is_none());
+        assert!(
+            bc.children.iter().any(|c| c.kind == "code_block"),
+            "expected a code_block child, got: {:?}",
+            bc.children.iter().map(|c| &c.kind).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn parse_block_component_props_then_slots() {
+        let input = "::card\n---\nvariant: elevated\n---\n#header\n## Title\n::";
+        let props = component_props(input).expect("expected props");
+        assert_eq!(props.get("variant"), Some(&Meta::String("elevated".into())));
+        let ast = parse(input);
+        let bc = find_block_component(&ast);
+        assert!(
+            bc.children.iter().any(|c| c.kind == "slot"),
+            "expected a slot child alongside props"
+        );
+    }
+
+    #[test]
+    fn render_block_component_props_omitted_from_html() {
+        let input = "::card{.featured}\n---\ntitle: Secret\n---\nBody\n::";
+        let html = markdown_to_html(input).unwrap();
+        assert!(html.contains("class=\"featured\""), "got: {html}");
+        assert!(
+            !html.contains("title"),
+            "typed props must not be emitted as HTML, got: {html}"
         );
     }
 
