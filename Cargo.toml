@@ -11,6 +11,7 @@ rust-version = "1.88"
 description = "Extensible Markdown pipelines powered by Rust"
 license = "MIT"
 repository = "https://github.com/noirbizarre/oxydemark"
+homepage = "https://noirbizarre.github.io/oxydemark/"
 documentation = "https://docs.rs/oxydemark"
 readme = "README.md"
 keywords = ["extensible", "markdown", "pipeline", "ast", "pyo3"]
