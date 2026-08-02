@@ -909,6 +909,18 @@ mod tests {
             .expect("component should carry a name attribute")
     }
 
+    /// Assert that both render paths produce exactly `expected`.
+    ///
+    /// The rushdown fast path and the standalone `AstNode` renderer must agree
+    /// byte for byte, so component output is stable whether or not a Python
+    /// plugin transformed the AST.
+    fn assert_both_paths(input: &str, expected: &str) {
+        let fast = markdown_to_html(input).expect("fast path should render");
+        let round_trip = render_ast_to_html(&parse(input));
+        assert_eq!(fast, expected, "Fast path output mismatch");
+        assert_eq!(round_trip, expected, "AST round-trip output mismatch");
+    }
+
     #[test]
     fn triple_colon_opens_block_component() {
         let input = ":::note\nContent\n:::";
@@ -1024,19 +1036,9 @@ mod tests {
 
     #[test]
     fn render_nested_components_emit_nested_divs() {
-        let input = ":::outer\n::inner\nx\n::\n:::";
-        let expected = "<div>\n<div>\n<p>x</p>\n</div>\n</div>";
-
-        let html = markdown_to_html(input).unwrap();
-        assert!(
-            html.contains(expected),
-            "Fast path should emit nested divs, got: {html}"
-        );
-
-        let round_trip = render_ast_to_html(&parse(input));
-        assert!(
-            round_trip.contains(expected),
-            "AST round-trip should emit nested divs, got: {round_trip}"
+        assert_both_paths(
+            ":::outer\n::inner\nx\n::\n:::",
+            "<div>\n<div>\n<p>x</p>\n</div>\n</div>\n",
         );
     }
 
@@ -1380,26 +1382,117 @@ mod tests {
 
     #[test]
     fn render_named_slots_emit_data_slot_wrappers() {
-        let input = "::card\n#header\n## Card Title\n\n#content\nMain content here.\n::";
-        let html = markdown_to_html(input).unwrap();
-        assert!(
-            html.contains("data-slot=\"header\""),
-            "Expected header slot wrapper, got: {html}"
-        );
-        assert!(
-            html.contains("data-slot=\"content\""),
-            "Expected content slot wrapper, got: {html}"
+        assert_both_paths(
+            "::card\n#header\n## Card Title\n\n#content\nMain content here.\n::",
+            concat!(
+                "<div>\n",
+                "<div data-slot=\"header\">\n",
+                "<h2 id=\"card-title\">Card Title</h2>\n",
+                "</div>\n",
+                "<div data-slot=\"content\">\n",
+                "<p>Main content here.</p>\n",
+                "</div>\n",
+                "</div>\n",
+            ),
         );
     }
 
     #[test]
-    fn render_slot_ast_round_trip() {
-        let input = "::card\n#header\n## Card Title\n::";
+    fn render_implicit_default_slot_is_not_wrapped() {
+        assert_both_paths(
+            "::card\nIntro\n\n#header\nH\n::",
+            concat!(
+                "<div>\n",
+                "<p>Intro</p>\n",
+                "<div data-slot=\"header\">\n",
+                "<p>H</p>\n",
+                "</div>\n",
+                "</div>\n",
+            ),
+        );
+    }
+
+    #[test]
+    fn render_explicit_default_slot_is_wrapped() {
+        assert_both_paths(
+            "::card\n#default\nD\n::",
+            "<div>\n<div data-slot=\"default\">\n<p>D</p>\n</div>\n</div>\n",
+        );
+    }
+
+    #[test]
+    fn render_nested_component_inside_slot() {
+        assert_both_paths(
+            ":::outer\n#a\n::inner\nx\n::\n:::",
+            concat!(
+                "<div>\n",
+                "<div data-slot=\"a\">\n",
+                "<div>\n",
+                "<p>x</p>\n",
+                "</div>\n",
+                "</div>\n",
+                "</div>\n",
+            ),
+        );
+    }
+
+    #[test]
+    fn render_three_level_nesting() {
+        assert_both_paths(
+            "::level-1\n:::level-2\n::::level-3\nContent\n::::\n:::\n::",
+            "<div>\n<div>\n<div>\n<p>Content</p>\n</div>\n</div>\n</div>\n",
+        );
+    }
+
+    #[test]
+    fn render_component_attributes_are_filtered_and_sorted() {
+        assert_both_paths(
+            "::card{#c .a .b data-z=1}\ntext\n::",
+            "<div class=\"a b\" data-z=\"1\" id=\"c\">\n<p>text</p>\n</div>\n",
+        );
+    }
+
+    #[test]
+    fn render_component_attribute_values_are_escaped() {
+        assert_both_paths(
+            "::card{title=\"a & <b>\"}\ntext\n::",
+            "<div title=\"a &amp; &lt;b&gt;\">\n<p>text</p>\n</div>\n",
+        );
+    }
+
+    #[test]
+    fn render_drops_non_html_component_attributes() {
+        let input = "::card{disabled foo=\"bar\"}\ntext\n::";
+        assert_both_paths(input, "<div>\n<p>text</p>\n</div>\n");
+
+        // The props remain available to plugins through the AST.
         let ast = parse(input);
-        let html = render_ast_to_html(&ast);
-        assert!(
-            html.contains("data-slot=\"header\""),
-            "Slot round-trip should emit data-slot wrapper, got: {html}"
+        let card = find_block_component(&ast);
+        assert_eq!(
+            card.attributes.get(":disabled").map(|v| v.as_str()),
+            Some("true"),
+            "Boolean props are `:`-prefixed in the AST"
+        );
+        assert_eq!(
+            card.attributes.get("foo").map(|v| v.as_str()),
+            Some("bar"),
+            "Non-HTML attributes stay in the AST"
+        );
+    }
+
+    #[test]
+    fn render_inline_component_attributes_are_filtered() {
+        assert_both_paths(
+            "Some :icon[star]{.big disabled} here",
+            "<p>Some <span class=\"big\">star</span> here</p>\n",
+        );
+    }
+
+    #[test]
+    fn render_span_attributes_are_filtered() {
+        assert_both_paths(
+            "A [text]{.hl disabled} b",
+            "<p>A <span class=\"hl\">text</span> b</p>\n",
         );
     }
 

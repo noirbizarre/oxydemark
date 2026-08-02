@@ -36,7 +36,7 @@ fn render_node(w: &mut String, node: &AstNode) {
                 .unwrap_or(1);
             let tag = format!("h{level}");
             write!(w, "<{tag}").unwrap();
-            render_html_attributes(w, node, &["level"]);
+            render_html_attributes(w, node);
             w.push('>');
             render_children(w, node);
             writeln!(w, "</{tag}>").unwrap();
@@ -101,7 +101,7 @@ fn render_node(w: &mut String, node: &AstNode) {
         "link" => {
             let href = node.attributes.get("href").map_or("", |v| v.as_str());
             write!(w, "<a href=\"{}\"", html_escape_attr(href)).unwrap();
-            render_html_attributes(w, node, &["href"]);
+            render_html_attributes(w, node);
             w.push('>');
             render_children(w, node);
             w.push_str("</a>");
@@ -109,7 +109,7 @@ fn render_node(w: &mut String, node: &AstNode) {
         "image" => {
             let src = node.attributes.get("src").map_or("", |v| v.as_str());
             write!(w, "<img src=\"{}\"", html_escape_attr(src)).unwrap();
-            render_html_attributes(w, node, &["src"]);
+            render_html_attributes(w, node);
             let alt = collect_text(node);
             if !alt.is_empty() {
                 write!(w, " alt=\"{}\"", html_escape_attr(&alt)).unwrap();
@@ -169,7 +169,7 @@ fn render_node(w: &mut String, node: &AstNode) {
         "block_component" => {
             // Passthrough: render as a bare <div> with attributes.
             w.push_str("<div");
-            render_html_attributes(w, node, &["name"]);
+            render_html_attributes(w, node);
             w.push_str(">\n");
             render_children(w, node);
             w.push_str("</div>\n");
@@ -188,7 +188,7 @@ fn render_node(w: &mut String, node: &AstNode) {
         "inline_component" => {
             // Passthrough: render as a bare <span> with attributes.
             w.push_str("<span");
-            render_html_attributes(w, node, &["name"]);
+            render_html_attributes(w, node);
             w.push('>');
             render_children(w, node);
             w.push_str("</span>");
@@ -196,7 +196,7 @@ fn render_node(w: &mut String, node: &AstNode) {
         "span_attributes" => {
             // Span attributes: render as <span> with attributes.
             w.push_str("<span");
-            render_html_attributes(w, node, &[]);
+            render_html_attributes(w, node);
             w.push('>');
             render_children(w, node);
             w.push_str("</span>");
@@ -214,13 +214,25 @@ fn render_children(w: &mut String, node: &AstNode) {
     }
 }
 
-/// Render HTML attributes from the node, excluding internal keys.
-fn render_html_attributes(w: &mut String, node: &AstNode, exclude: &[&str]) {
-    for (key, value) in &node.attributes {
-        if exclude.contains(&key.as_str()) {
-            continue;
-        }
-        write!(w, " {}=\"{}\"", key, html_escape_attr(value)).unwrap();
+/// Render HTML attributes from the node, filtered and ordered deterministically.
+///
+/// Only keys accepted by [`is_renderable_attribute`] are emitted, and they are
+/// sorted by name so this renderer matches the fast path byte for byte.
+fn render_html_attributes(w: &mut String, node: &AstNode) {
+    let mut keys: Vec<&String> = node
+        .attributes
+        .keys()
+        .filter(|key| is_renderable_attribute(key))
+        .collect();
+    keys.sort_unstable();
+    for key in keys {
+        write!(
+            w,
+            " {}=\"{}\"",
+            key,
+            html_escape_attr(&node.attributes[key])
+        )
+        .unwrap();
     }
 }
 
@@ -247,4 +259,17 @@ pub(crate) fn html_escape(s: &str) -> String {
 /// Escape HTML special characters in attribute values.
 fn html_escape_attr(s: &str) -> String {
     html_escape(s)
+}
+
+/// Returns `true` when an attribute key is safe to emit into default HTML output.
+///
+/// Per OMEP-0007 only HTML-valid inline attributes reach the component element.
+/// Internal keys (such as the synthetic `name`) and `:`-prefixed typed or
+/// boolean props are dropped from HTML while remaining available in the AST.
+pub(crate) fn is_renderable_attribute(key: &str) -> bool {
+    matches!(
+        key,
+        "class" | "id" | "style" | "title" | "role" | "lang" | "dir"
+    ) || key.starts_with("data-")
+        || key.starts_with("aria-")
 }

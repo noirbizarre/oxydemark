@@ -29,7 +29,7 @@ use rushdown::{as_kind_data, as_type_data};
 use rushdown_emoji::Emoji;
 use rushdown_meta::{MetaParserOptions, meta_parser_extension};
 
-use crate::html_render::html_escape;
+use crate::html_render::{html_escape, is_renderable_attribute};
 
 // ---------------------------------------------------------------------------
 // Extension node types
@@ -576,8 +576,8 @@ impl BlockParser for SlotParser {
 
     fn cont(
         &self,
-        _arena: &mut Arena,
-        _node_ref: NodeRef,
+        arena: &mut Arena,
+        node_ref: NodeRef,
         reader: &mut text::BasicReader,
         _ctx: &mut Context,
     ) -> Option<State> {
@@ -585,10 +585,18 @@ impl BlockParser for SlotParser {
         let line = std::str::from_utf8(&line_bytes).ok()?;
         let trimmed = line.trim();
 
-        // The closing colon run of the enclosing component or the next slot
-        // marker both end this slot; the line is left for the parent/sibling
+        // The next slot marker ends this slot; the line is left for the sibling
         // parser.
-        if colon_run_len(trimmed).is_some() || slot_marker_name(line).is_some() {
+        if slot_marker_name(line).is_some() {
+            return None;
+        }
+
+        // A colon run ends this slot too, but only when it does not belong to a
+        // component nested inside the slot: such a run closes the nested
+        // component, not the slot itself.
+        if let Some(colons) = colon_run_len(trimmed)
+            && !has_open_descendant_with_colons(arena, node_ref, colons)
+        {
             return None;
         }
 
@@ -881,7 +889,9 @@ pub(crate) fn span_attribute_parser_extension() -> impl ParserExtension {
 ///
 /// Supports: `.class`, `#id`, `key="value"`, `key='value'`, `key=value`.
 /// Multiple `.class` entries are merged into a single `class` attribute,
-/// space-separated.
+/// space-separated. A bare `key` is a boolean prop and is stored as
+/// `:key = "true"`, following the comark convention of prefixing typed and
+/// value-less props with `:` (OMEP-0007).
 pub(crate) fn parse_component_attributes(attr_str: &str, node: &mut ast::Node) {
     let mut classes = Vec::new();
     let input = attr_str.trim();
@@ -966,9 +976,10 @@ pub(crate) fn parse_component_attributes(attr_str: &str, node: &mut ast::Node) {
                 node.attributes_mut()
                     .insert(key, text::Value::from(value.to_string()));
             } else {
-                // Boolean attribute (key with no value).
+                // Boolean prop: `:`-prefixed with value "true" (OMEP-0007).
+                let key = format!(":{key}");
                 node.attributes_mut()
-                    .insert(key, text::Value::from(String::new()));
+                    .insert(key, text::Value::from("true".to_string()));
             }
         }
     }
@@ -1123,6 +1134,33 @@ fn is_more_comment(raw: &str) -> bool {
 // HTML renderers for Comark extensions (rushdown fast path)
 // ---------------------------------------------------------------------------
 
+/// Writes the HTML attributes of a component-like node onto `writer`.
+///
+/// Only keys accepted by [`is_renderable_attribute`] are emitted, sorted by
+/// name, so the fast path matches the standalone `AstNode` renderer byte for
+/// byte (OMEP-0007 rendering rules).
+fn write_component_attributes<W: TextWrite>(
+    writer: &mut W,
+    source: &str,
+    node: &ast::Node,
+) -> rushdown::Result<()> {
+    let mut attrs: Vec<(String, String)> = node
+        .attributes()
+        .iter()
+        .filter(|(key, _)| is_renderable_attribute(key))
+        .map(|(key, value)| (key.to_string(), value.str(source).to_string()))
+        .collect();
+    attrs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    for (key, value) in &attrs {
+        writer.write_str(" ")?;
+        writer.write_str(key)?;
+        writer.write_str("=\"")?;
+        writer.write_str(&html_escape(value))?;
+        writer.write_str("\"")?;
+    }
+    Ok(())
+}
+
 /// Renders block components as bare `<div>` elements.
 #[derive(Debug)]
 struct BlockComponentHtmlRenderer;
@@ -1140,14 +1178,7 @@ impl<W: TextWrite> RenderNode<W> for BlockComponentHtmlRenderer {
         let node = &arena[node_ref];
         if entering {
             writer.write_str("<div")?;
-            for (key, value) in node.attributes().iter() {
-                writer.write_str(" ")?;
-                writer.write_str(key)?;
-                writer.write_str("=\"")?;
-                let val = value.str(source);
-                writer.write_str(&html_escape(val))?;
-                writer.write_str("\"")?;
-            }
+            write_component_attributes(writer, source, node)?;
             writer.write_str(">\n")?;
         } else {
             writer.write_str("</div>\n")?;
@@ -1235,14 +1266,7 @@ impl<W: TextWrite> RenderNode<W> for InlineComponentHtmlRenderer {
         let node = &arena[node_ref];
         if entering {
             writer.write_str("<span")?;
-            for (key, value) in node.attributes().iter() {
-                writer.write_str(" ")?;
-                writer.write_str(key)?;
-                writer.write_str("=\"")?;
-                let val = value.str(source);
-                writer.write_str(&html_escape(val))?;
-                writer.write_str("\"")?;
-            }
+            write_component_attributes(writer, source, node)?;
             writer.write_str(">")?;
         } else {
             writer.write_str("</span>")?;
@@ -1285,14 +1309,7 @@ impl<W: TextWrite> RenderNode<W> for SpanAttributeHtmlRenderer {
         let node = &arena[node_ref];
         if entering {
             writer.write_str("<span")?;
-            for (key, value) in node.attributes().iter() {
-                writer.write_str(" ")?;
-                writer.write_str(key)?;
-                writer.write_str("=\"")?;
-                let val = value.str(source);
-                writer.write_str(&html_escape(val))?;
-                writer.write_str("\"")?;
-            }
+            write_component_attributes(writer, source, node)?;
             writer.write_str(">")?;
         } else {
             writer.write_str("</span>")?;
