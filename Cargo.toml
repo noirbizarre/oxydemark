@@ -57,7 +57,12 @@ python = ["dep:pyo3"]
 # Adds `extension-module` linkage on top of `python` for building the wheel.
 # maturin activates this feature (see `pyproject.toml`); it must NOT be used
 # for `cargo test` because the test harness needs to link libpython itself.
-extension-module = ["python", "pyo3/extension-module"]
+#
+# `abi3-py312` is gated here rather than on `python` on purpose: the wheel is
+# built against the stable ABI (one `cp312-abi3` artifact per platform covering
+# Python 3.12+, OMEP-0009), while `cargo test --features python` keeps the
+# version-specific ABI required by the `auto-initialize` dev-dependency.
+extension-module = ["python", "pyo3/extension-module", "pyo3/abi3-py312"]
 
 [dependencies]
 pyo3 = { version = "0.28", optional = true }

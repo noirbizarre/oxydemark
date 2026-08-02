@@ -39,8 +39,9 @@ docs = ["zensical>=0.0.11", "mkdocstrings-python>=1.11"]
 
 [tool.maturin]
 # Activate the crate's `extension-module` feature, which enables the optional
-# `pyo3` dependency, the binding layer, and `pyo3/extension-module` linkage for
-# the wheel build (issue #20).
+# `pyo3` dependency, the binding layer, `pyo3/extension-module` linkage and
+# `pyo3/abi3-py312` for the wheel build (issue #20). Thanks to abi3, a single
+# `cp312-abi3` wheel per platform covers every supported Python (>=3.12).
 features = ["extension-module"]
 python-source = "python"
 module-name = "oxydemark._core"
