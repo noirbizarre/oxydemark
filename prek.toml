@@ -39,3 +39,13 @@ language = "system"
 entry = "cargo clippy -- -D warnings"
 files = '\\.rs$'
 pass_filenames = false
+
+# Runs over the whole tree rather than the staged files: `typos.toml` already
+# scopes what is checked, and the same binary is what `cliff.toml` uses to fix
+# commit subjects at changelog-render time.
+[[repos.hooks]]
+id = "typos"
+name = "typos"
+language = "system"
+entry = "typos"
+pass_filenames = false

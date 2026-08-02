@@ -198,9 +198,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # git-cliff derives the next version from the last tag; a shallow
+          # clone has neither history nor tags.
           fetch-depth: 0
+          fetch-tags: true
 
-      - uses: taiki-e/install-action@git-cliff
+      # mise provides both git-cliff *and* typos. The latter is not optional:
+      # `cliff.toml` runs `typos --write-changes -` as a commit preprocessor,
+      # so git-cliff fails outright without it on PATH.
+      - uses: jdx/mise-action@v4
+        with:
+          cache: true
 
-      - name: Validate changelog
-        run: git cliff --unreleased --strip header
+      - name: Spell-check
+        run: typos
+
+      # Renders exactly what the Release PR and the GitHub Release will carry,
+      # so a template regression fails here rather than mid-release.
+      - name: Validate the release notes
+        run: git cliff --unreleased --bump --strip all

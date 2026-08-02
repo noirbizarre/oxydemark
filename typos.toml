@@ -1,0 +1,25 @@
+# typos configuration.
+# https://github.com/crate-ci/typos
+#
+# Beyond the pre-commit hook, `cliff.toml` runs `typos --write-changes -` as a
+# commit preprocessor, so this file also governs how commit subjects are
+# rendered in the changelog.
+
+[files]
+extend-exclude = [
+  "Cargo.lock",
+  "uv.lock",
+  "mise.lock",
+  # Comark compliance fixtures are verbatim Markdown corpora: their contents
+  # are the specification under test, typos included.
+  "tests/compliance/**",
+  # Build outputs.
+  "target/**",
+  "dist/**",
+  "site/**",
+]
+
+[default.extend-words]
+# "OMEP" (OxydeMark Enhancement Proposal) tokenises to `OME`, which typos
+# corrects to `SOME`.
+OME = "OME"
