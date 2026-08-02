@@ -126,20 +126,30 @@ deferred.
 
 Built with maturin (via `PyO3/maturin-action`) and published to PyPI.
 
-| Platform | Architectures | Python |
-| -------- | ------------- | ------ |
-| Linux (manylinux) | `x86_64`, `aarch64` | 3.12, 3.13 |
-| macOS | `x86_64`, `arm64` (or a universal2 wheel) | 3.12, 3.13 |
-| Windows | `x86_64` | 3.12, 3.13 |
+`abi3` (the stable Python ABI) was adopted: the crate's `extension-module`
+feature enables `pyo3/abi3-py312`, so maturin emits a single `cp312-abi3` wheel
+per target that covers every supported Python (3.12, 3.13, 3.14 and later).
+The matrix therefore varies by target only:
 
+| Runner | Target |
+| ------ | ------ |
+| `ubuntu-latest` | `x86_64-unknown-linux-gnu` (manylinux) |
+| `ubuntu-latest` | `aarch64-unknown-linux-gnu` (manylinux, cross) |
+| `macos-13` | `x86_64-apple-darwin` |
+| `macos-14` | `aarch64-apple-darwin` |
+| `windows-latest` | `x86_64-pc-windows-msvc` |
+
+* `abi3-py312` is gated on `extension-module`, not on `python`, so
+  `cargo test --features python` keeps the version-specific ABI its
+  `auto-initialize` dev-dependency requires.
 * A **source distribution (sdist)** is also built (`maturin sdist`) so that
   platforms outside the matrix can build from source given a Rust toolchain.
-* Where practical, `abi3` (the stable Python ABI, `abi3-py312`) is used to
-  emit a single wheel per platform that covers 3.12+, shrinking the matrix; the
-  logical support target remains Python 3.12 and 3.13.
+* Each wheel is verified before upload (`.github/scripts/check_wheel.py`): it
+  must be `abi3`-tagged and must contain `py.typed` and `_core.pyi`
+  (OMEP-0008). The sdist is installed and imported in a clean virtualenv, which
+  guards the `Cargo.toml` `include` allow-list.
 * All wheels and the sdist are collected as workflow artifacts, then published
-  in a single final job with `maturin upload` / the maturin-action publish
-  step.
+  in a single final `pypi` job with `pypa/gh-action-pypi-publish`.
 * Authentication uses PyPI **Trusted Publishing** (OIDC via
   `pypa/gh-action-pypi-publish` or maturin's OIDC support); no PyPI API token
   secret is stored.
@@ -241,10 +251,15 @@ surface has stabilised.
   smoke-test wheels), [OMEP-0008](OMEP-0008-public-api.md) (lockstep versioning
   and the frozen surfaces being distributed).
 * Follow-up actions:
-  * Add `.github/workflows/release.yml` implementing the tag-triggered pipeline.
-  * Configure Trusted Publishers on crates.io and PyPI.
-  * Add `cargo publish --dry-run` and `maturin build`/`maturin sdist` checks to
-    the PR CI.
+  * ~~Add `.github/workflows/release.yml` implementing the tag-triggered
+    pipeline.~~ Done: version gate, `crates-io`, `wheels`, `sdist` and `pypi`
+    jobs.
+  * Configure Trusted Publishers on crates.io and PyPI (crates.io done; PyPI
+    must be bound to repository `noirbizarre/oxydemark`, workflow
+    `release.yml`, environment `release`).
+  * ~~Add `cargo publish --dry-run` and `maturin build`/`maturin sdist` checks
+    to the PR CI.~~ Done: the `package`, `python` and `sdist` jobs in
+    `ci.yml`.
   * Note: with maturin's default `sdist-generator = "cargo"`, the sdist file
     list is derived from `cargo package --list`. Any `include`/`exclude` in
     `[package]` therefore constrains the PyPI sdist as well as the crates.io

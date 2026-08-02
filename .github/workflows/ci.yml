@@ -115,11 +115,44 @@ jobs:
         env:
           MATURIN_PEP517_ARGS: "--profile release"
 
+      # Same gate as the release workflow: abi3 tagging plus the packaged
+      # `py.typed`/stub, checked on every pull request instead of at tag time.
+      - name: Verify wheel contents
+        run: python3 .github/scripts/check_wheel.py dist
+
       - name: Install and smoke-test
         run: |
           uv venv /tmp/smoke
           uv pip install --python /tmp/smoke/bin/python dist/*.whl
           /tmp/smoke/bin/python -c "import oxydemark; print(oxydemark.markdown_to_html('hello'))"
+
+  # The PyPI sdist file list is derived from `cargo package --list`, so a
+  # tightened `include` in `Cargo.toml` can produce a tarball that no longer
+  # builds. Catch that on the pull request rather than on the release tag
+  # (OMEP-0009).
+  sdist:
+    name: Python sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist
+        run: uvx --from "maturin>=1.8,<2.0" maturin sdist --out dist
+
+      - name: Install sdist and smoke-test
+        run: |
+          set -euo pipefail
+          uv venv /tmp/sdist-smoke
+          uv pip install --python /tmp/sdist-smoke/bin/python --no-binary :all: dist/*.tar.gz
+          /tmp/sdist-smoke/bin/python -c "import oxydemark; print(oxydemark.markdown_to_html('hello'))"
 
   docs:
     name: Documentation
