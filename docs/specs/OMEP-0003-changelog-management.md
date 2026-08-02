@@ -60,9 +60,27 @@ Commits out of the box.
 
 ### Confirmation
 
-* CI runs `git cliff --unreleased` on every push to verify that recent
-  commits are parseable.
-* `mise run changelog` regenerates the full file locally.
+* CI renders the next release's notes on every push
+  (`git cliff --unreleased --bump --strip all`) to verify that recent commits
+  are parseable and that the template still works.
+* `mise run changelog` regenerates the full file locally;
+  `mise run changelog:preview` shows just the next release's notes.
+
+!!! note "Amended 2026-08-02 (OMEP-0009)"
+
+    `cliff.toml` was replaced with the configuration shared with
+    [gh-ship](https://github.com/noirbizarre/gh-ship), so the two projects
+    render release notes identically. Two consequences for this OMEP:
+
+    * The output no longer follows the *Keep a Changelog* layout literally.
+      Compare links are inline in each release heading rather than collected
+      into a link-reference footer, groups carry emoji labels, and each entry
+      links to its commit. The spirit -- a human-readable, chronological,
+      grouped changelog -- is unchanged.
+    * `git-cliff` is no longer only a reporting tool: `--bumped-version` is what
+      derives the next version in `prepare-release.yml`, and `cliff.toml` shells
+      out to [`typos`](https://github.com/crate-ci/typos) as a commit
+      preprocessor, so that binary is now required wherever git-cliff runs.
 
 ## Pros and Cons of the Options
 

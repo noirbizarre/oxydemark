@@ -57,9 +57,11 @@ to see the full list.
 | `mise run lint`         | Run clippy lints                         |
 | `mise run fmt`          | Format Rust source code                  |
 | `mise run fmt:check`    | Check formatting without modifying files |
+| `mise run typos`        | Spell-check sources, docs and commit messages |
 | `mise run ci`           | Run all CI checks locally                |
-| `mise run changelog`    | Generate `CHANGELOG.md`                  |
-| `mise run changelog:preview` | Preview unreleased changelog entries |
+| `mise run changelog`    | Generate `CHANGELOG.md` for the next version |
+| `mise run changelog:preview` | Preview the next version's release notes |
+| `mise run release:preview` | Dry-run the release preparation       |
 | `mise run cover`        | Generate code coverage report            |
 | `mise run bench`        | Run Python benchmarks                    |
 | `mise run docs`         | Build the docs site and rustdoc reference |
@@ -146,6 +148,41 @@ See the existing OMEPs for examples.
 The changelog is generated automatically from commit messages using
 [git-cliff](https://git-cliff.org/). You do **not** need to edit
 `CHANGELOG.md` by hand -- just write proper Conventional Commit messages.
+
+`cliff.toml` also drives version selection, so the commit type you choose has
+consequences: a `feat` bumps the minor version, a breaking change bumps the
+major, and `chore(deps)` / `chore(release)` commits are excluded from the notes
+entirely.
+
+## Releasing
+
+Releases are orchestrated by [gh-ship](https://github.com/noirbizarre/gh-ship)
+using a Release-PR model (OMEP-0009). Maintainers never tag by hand.
+
+1. **Every push to `main`** triggers 🚢 Ship, which runs `gh ship prepare`. That
+   dispatches 🚀 Prepare Release, which derives the next version with
+   `git cliff --bumped-version`, regenerates `CHANGELOG.md`, bumps `Cargo.toml`,
+   `pyproject.toml`, `Cargo.lock` and `uv.lock` in lockstep, and opens or
+   updates the **Release PR** from `release/next`.
+   If there is nothing to release the run reports `changed: false` and exits 0.
+2. **Review the Release PR.** The version bump and the exact release notes are
+   both visible there. This is the last reversible point: neither crates.io nor
+   PyPI lets a published version be overwritten.
+3. **Merge it.** 🚢 Ship then runs `gh ship release`, which tags the merge
+   commit, creates the GitHub Release as a draft, dispatches 📦 Publish Release
+   (crates.io, PyPI, and the wheels/sdist attached as assets), and finally makes
+   the release visible.
+
+To see what the next release would look like without touching anything:
+
+```sh
+gh extension install noirbizarre/gh-ship
+mise run release:preview     # or: gh ship preview --json
+gh ship status               # where a release currently stands
+```
+
+Note that `release/next` is a staging branch owned by gh-ship: anything pushed
+to it by hand is discarded.
 
 ## License
 

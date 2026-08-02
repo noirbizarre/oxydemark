@@ -1,10 +1,18 @@
 ---
-status: proposed
-date: 2026-07-12
+status: accepted
+date: 2026-08-02
 decision-makers: [Axel H.]
 ---
 
 # OMEP-0009: Publishing & Distribution (crates.io + PyPI)
+
+!!! note "Amended 2026-08-02"
+
+    The original decision chose **T2 (tag-triggered releases)**. That has been
+    reversed in favour of **T3: a Release-PR model orchestrated by
+    [gh-ship](https://github.com/noirbizarre/gh-ship)**. The authentication
+    (A2), wheel matrix (W2) and library-only (C1) decisions are unchanged.
+    Sections marked *(amended)* below carry the current behaviour.
 
 ## Context and Problem Statement
 
@@ -58,6 +66,12 @@ version) and the CI foundations in OMEP-0005.
 * **Option T2: Tag-triggered release workflow** -- Pushing an `X.Y.Z` tag runs
   a GitHub Actions workflow that builds, publishes to both indexes, and creates
   the GitHub Release.
+* **Option T3: Release-PR model orchestrated by gh-ship** *(amended)* -- Every
+  push to `main` runs `gh ship prepare`, which dispatches a workflow that
+  computes the next version, regenerates the changelog and opens a **Release
+  PR**. Merging it runs `gh ship release`, which tags the merge commit, drafts
+  the GitHub Release, dispatches the publish workflow, then makes the release
+  visible.
 
 ### Authentication
 
@@ -84,31 +98,63 @@ version) and the CI foundations in OMEP-0005.
 
 ## Decision Outcome
 
-Chosen options: **T2 (tag-triggered workflow)**, **A2 (Trusted Publishing)**,
-**W2 (full platform/Python matrix + sdist)**, and **C1 (library-only for
-v0.2.0)**.
+Chosen options: **T3 (Release-PR model orchestrated by gh-ship)**, **A2
+(Trusted Publishing)**, **W2 (full platform/Python matrix + sdist)**, and **C1
+(library-only for v0.2.0)**.
 
-Together these define a single `release` workflow, triggered by an `X.Y.Z` tag,
-that authenticates via OIDC, builds the full wheel matrix plus an sdist and the
-crate, publishes them, and cuts a GitHub Release whose body is the git-cliff
-changelog section for that version. v0.2.0 remains library-only; a CLI is
-deferred.
+Together these define a release lifecycle in which `gh ship` owns the
+*orchestration* (release branch, workflow dispatch, Release PR, tag, GitHub
+Release) while this repository owns the *content* (version bump, changelog,
+build, publish). Authentication is OIDC throughout; the full wheel matrix plus
+an sdist and the crate are published on merge of the Release PR. v0.2.0 remains
+library-only; a CLI is deferred.
 
-### Release trigger and versioning
+### Release trigger and versioning *(amended)*
 
-* Releases are cut by pushing an annotated tag of the form `X.Y.Z` (e.g.
-  `0.2.0`, with no `v` prefix) to `main`. The tag is the single trigger for the
-  `release` workflow. `cliff.toml`'s `tag_pattern` matches the same form.
-* Before tagging, the maintainer bumps the version **in lockstep** in both
-  `Cargo.toml` and `pyproject.toml` to the same `X.Y.Z` (OMEP-0008). The
-  workflow verifies that the two manifest versions and the tag all agree and
-  fails fast otherwise.
+The release is driven by three workflows plus `.github/ship.yml`:
+
+| File | Role |
+| ---- | ---- |
+| `.github/workflows/ship.yml` | Orchestrator. Runs `gh ship prepare` on every push to `main`, and `gh ship release` when the Release PR merges. |
+| `.github/workflows/prepare-release.yml` | Ours. Computes the version, regenerates `CHANGELOG.md`, bumps the manifests, emits the release artifact. |
+| `.github/workflows/release.yml` | Ours. Publishes to crates.io and PyPI and attaches assets to the draft release. |
+
+* **No manual tagging.** `gh ship release` creates the tag on the **merge
+  commit** of the Release PR -- never a remembered SHA, since a squash merge
+  produces a new one. Tags remain unprefixed `X.Y.Z`, matching `cliff.toml`'s
+  `tag_pattern`.
+* **The version is derived, not chosen.** `prepare-release.yml` runs
+  `git cliff --bumped-version` and compares the result against the last *tag*
+  (`git describe --tags --abbrev=0`), not against the manifests -- the manifests
+  already carry the version being prepared, so comparing to them would report
+  "no change" for the very first release and make bootstrapping impossible.
+* **Bootstrapping.** The repository carries no tags, so git-cliff returns
+  `[bump] initial_tag` verbatim. That is set to **`0.2.0`**, not `0.1.0`,
+  because `oxydemark` 0.1.0 is already published on crates.io (a name
+  reservation predating this pipeline) and crates.io refuses to overwrite a
+  released version.
+* **Lockstep bump.** `prepare-release.yml` writes the version into
+  `Cargo.toml`, `pyproject.toml`, `Cargo.lock` (`cargo update --workspace`) and
+  `uv.lock` (`uv lock`) in one commit, `chore(release): X.Y.Z`. The version gate
+  in `release.yml` still verifies tag/manifest agreement -- it now catches a
+  faulty prepare run rather than a bad manual tag.
 * Version numbers follow the 0.x policy from OMEP-0008: a breaking change to a
   public surface bumps MINOR (`0.1.z -> 0.2.0`); additive/fix changes bump
-  PATCH.
-* The GitHub Release notes are generated with `git cliff --tag X.Y.Z` so the
-  release body matches `CHANGELOG.md` (OMEP-0003). The changelog is not edited
-  by hand.
+  PATCH. `cliff.toml` sets `features_always_bump_minor` and
+  `breaking_always_bump_major`.
+* **Notes are generated pre-merge.** `git cliff --unreleased --bump --strip all`
+  produces the notes, which travel in the `ship.release.json` artifact through
+  the Release PR body to the GitHub Release. What ships is therefore exactly
+  what was reviewed. `CHANGELOG.md` is never edited by hand (OMEP-0003).
+* **`release.yml` must keep its filename.** The crates.io and PyPI Trusted
+  Publishers are bound to the workflow *filename*; renaming it to
+  `publish-release.yml` (gh-ship's template name) would make both registries
+  reject the OIDC token. `.github/ship.yml` therefore declares
+  `workflows.publish: release`.
+* **Contract with gh-ship.** Both dispatched workflows must declare
+  `workflow_dispatch` (a `workflow_call`-only workflow cannot be started
+  through the API) and must carry the `ship:${{ inputs.ship_id }}` nonce in
+  their `run-name`, which is how gh-ship correlates a dispatch to a run.
 
 ### crates.io publish flow
 
@@ -154,15 +200,29 @@ The matrix therefore varies by target only:
   `pypa/gh-action-pypi-publish` or maturin's OIDC support); no PyPI API token
   secret is stored.
 
-### Trusted Publishing
+### Trusted Publishing *(amended)*
 
-* Both indexes are configured with the GitHub repository, the `release`
-  workflow filename, and (optionally) a dedicated `release` GitHub Environment
-  as the Trusted Publisher.
+* Both indexes are configured with the GitHub repository, the workflow
+  filename `release.yml`, and the `release` GitHub Environment as the Trusted
+  Publisher. **The filename is part of the OIDC claim**, so `release.yml` may
+  not be renamed and its publishing jobs must keep `environment: release`.
+* The trigger type is *not* part of the claim, so moving `release.yml` from
+  `on: push: tags` to `on: workflow_dispatch` (dispatched by gh-ship) does not
+  affect either publisher.
+* `oxydemark` does not yet exist on PyPI, so it is bootstrapped with a PyPI
+  **pending publisher**: a Trusted Publisher registered against a project that
+  does not exist, which reserves the name and converts to a normal publisher on
+  the first upload. No manual placeholder release is needed.
 * The `release` workflow requests `permissions: id-token: write` so GitHub mints
   the OIDC token used to authenticate to both crates.io and PyPI.
 * Rationale: short-lived, scope-limited credentials eliminate the standing risk
   of leaked long-lived tokens and remove secret-rotation toil.
+* gh-ship itself is *not* secretless: `ship.yml` and `prepare-release.yml` need
+  a `SHIP_TOKEN` (GitHub App token or fine-grained PAT) in the `release`
+  environment, because a pull request authored by the default `GITHUB_TOKEN`
+  does not trigger workflows and the Release PR would show no CI results. It
+  needs Contents, Actions, Pull requests and Issues read/write, plus Metadata
+  read.
 
 ### CLI in v0.2.0: library-only
 
@@ -176,42 +236,65 @@ surface has stabilised.
 
 ### Consequences
 
-* Good, because a single tag push produces coherent, traceable releases across
-  both ecosystems with release notes that match the changelog.
+* Good, because merging one reviewed pull request produces coherent, traceable
+  releases across both ecosystems with release notes that match the changelog.
+* Good, because the version bump and the release notes are **reviewable before
+  they exist as a tag**: a mistake is a closed pull request, not a published
+  version that neither registry lets you overwrite.
 * Good, because Trusted Publishing removes all long-lived registry secrets from
   the repository.
 * Good, because the full wheel matrix means Python consumers never need a Rust
   toolchain on the common platforms.
 * Good, because reusing maturin, GitHub Actions, and git-cliff avoids new
-  tooling.
+  tooling in the *content* half; gh-ship is confined to orchestration and never
+  parses a version or renders a changelog.
 * Bad, because the wheel matrix (cross-compilation for aarch64, macOS, Windows)
   materially lengthens the release workflow and adds runner cost.
 * Bad, because lockstep versioning can force a no-op bump on one ecosystem when
   only the other changed (already accepted in OMEP-0008).
+* Bad, because gh-ship reintroduces one stored secret (`SHIP_TOKEN`) after A2
+  had removed all of them, and adds a third-party dependency to the release
+  path.
 * Neutral, because deferring the CLI keeps scope small now but leaves a
   frequently-requested convenience for later.
 
 ### Confirmation
 
 * `ls docs/specs/OMEP-0009-publishing.md` confirms the OMEP exists.
-* A `release` workflow (`.github/workflows/release.yml`) exists and is triggered
-  by unprefixed `X.Y.Z` tags.
+* `.github/ship.yml`, `.github/workflows/ship.yml`,
+  `.github/workflows/prepare-release.yml` and `.github/workflows/release.yml`
+  all exist; `gh ship validate` reports the setup and both dispatched workflows
+  as conformant.
+* `git cliff --bumped-version` prints `0.2.0` on a repository with no tags.
+* `gh ship preview` dry-runs the preparation without mutating anything and
+  reports `changed: true`, `version: 0.2.0`, `tag: 0.2.0`.
 * On a pull request, CI runs `cargo publish --dry-run` and `maturin build` so
-  packaging regressions are caught before a tag is cut.
+  packaging regressions are caught before a release is prepared, and renders the
+  release notes so a `cliff.toml` regression fails there rather than mid-release.
 * A version-consistency check fails the release if the tag, `Cargo.toml`, and
   `pyproject.toml` versions disagree.
-* After the first tagged release, `cargo add oxydemark` and
-  `pip install oxydemark` resolve the same `X.Y.Z`, and a matching GitHub
-  Release exists with git-cliff-generated notes.
+* After the first release, `cargo add oxydemark` and `pip install oxydemark`
+  resolve the same `X.Y.Z`, and a matching non-draft GitHub Release exists with
+  git-cliff-generated notes and the wheels plus sdist attached.
 
 ## Pros and Cons of the Options
 
-### Trigger: T1 (manual) vs T2 (tag-triggered)
+### Trigger: T1 (manual) vs T2 (tag-triggered) vs T3 (Release PR)
 
 * T1 -- Good, because zero workflow to maintain. Bad, because error-prone,
   non-reproducible, and easy to publish mismatched versions to the two indexes.
-* T2 (Chosen) -- Good, because reproducible, auditable, and atomic across
-  ecosystems. Neutral, because it requires an extra workflow file.
+* T2 -- Good, because reproducible, auditable, and atomic across ecosystems.
+  Bad, because the tag is the point of no return: the version bump, the
+  changelog and the notes are only observable *after* the tag exists, and
+  neither crates.io nor PyPI permits overwriting a published version. It also
+  relies on the maintainer bumping four files by hand, in lockstep, correctly.
+* T3 (Chosen) -- Good, because the Release PR makes the bump, the regenerated
+  changelog and the exact release notes reviewable before anything is
+  published, and the notes travel in a single artifact from the PR body to the
+  GitHub Release so what ships equals what was reviewed. Good, because tagging
+  becomes a consequence of merging rather than a manual act. Bad, because it
+  adds a third-party orchestrator and a stored `SHIP_TOKEN`. Neutral, because
+  the publish workflow is largely the T2 one with its trigger swapped.
 
 ### Auth: A1 (tokens) vs A2 (Trusted Publishing)
 
@@ -246,20 +329,29 @@ surface has stabilised.
 * [`PyO3/maturin-action`](https://github.com/PyO3/maturin-action).
 * [`pypa/gh-action-pypi-publish`](https://github.com/pypa/gh-action-pypi-publish).
 * [Cargo -- publishing on crates.io](https://doc.rust-lang.org/cargo/reference/publishing.html).
+* [gh-ship](https://github.com/noirbizarre/gh-ship) and its
+  [workflow contract](https://noirbizarre.github.io/gh-ship/workflows/) /
+  [release artifact spec](https://noirbizarre.github.io/gh-ship/specifications/release-artifact/).
 * Related: [OMEP-0003](OMEP-0003-changelog-management.md) (git-cliff release
   notes), [OMEP-0005](OMEP-0005-ci-cd-pipeline.md) (CI that already builds
   smoke-test wheels), [OMEP-0008](OMEP-0008-public-api.md) (lockstep versioning
   and the frozen surfaces being distributed).
 * Follow-up actions:
-  * ~~Add `.github/workflows/release.yml` implementing the tag-triggered
-    pipeline.~~ Done: version gate, `crates-io`, `wheels`, `sdist` and `pypi`
-    jobs.
-  * Configure Trusted Publishers on crates.io and PyPI (crates.io done; PyPI
-    must be bound to repository `noirbizarre/oxydemark`, workflow
-    `release.yml`, environment `release`).
+  * ~~Add `.github/workflows/release.yml` implementing the publish
+    pipeline.~~ Done: version gate, `crates-io`, `wheels`, `sdist`, `pypi` and
+    `assets` jobs.
+  * ~~Adopt gh-ship and add the Release-PR orchestration.~~ Done:
+    `.github/ship.yml`, `ship.yml` and `prepare-release.yml`.
   * ~~Add `cargo publish --dry-run` and `maturin build`/`maturin sdist` checks
     to the PR CI.~~ Done: the `package`, `python` and `sdist` jobs in
     `ci.yml`.
+  * **Outstanding (manual, one-time):**
+    * Register the PyPI **pending publisher**: project `oxydemark`, repository
+      `noirbizarre/oxydemark`, workflow `release.yml`, environment `release`.
+    * Confirm the crates.io Trusted Publisher is bound to `release.yml` and
+      environment `release`.
+    * Create `SHIP_TOKEN` (GitHub App token preferred) and store it in the
+      `release` environment.
   * Note: with maturin's default `sdist-generator = "cargo"`, the sdist file
     list is derived from `cargo package --list`. Any `include`/`exclude` in
     `[package]` therefore constrains the PyPI sdist as well as the crates.io
