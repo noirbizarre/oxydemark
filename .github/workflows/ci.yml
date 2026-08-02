@@ -6,10 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# `RUSTFLAGS` is deliberately *not* set workflow-wide: it also applies to
+# third-party crates built from source (maturin in the `sdist` job), where
+# upstream warnings would fail our CI. It is set per job on the jobs that
+# only compile this crate.
 env:
   CARGO_TERM_COLOR: always
   FORCE_COLOR: 1
-  RUSTFLAGS: -Dwarnings
 
 jobs:
   check:
@@ -32,6 +35,8 @@ jobs:
 
   test:
     name: Test (${{ matrix.toolchain }})
+    env:
+      RUSTFLAGS: -Dwarnings
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -53,6 +58,8 @@ jobs:
 
   build:
     name: Build
+    env:
+      RUSTFLAGS: -Dwarnings
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,6 +73,8 @@ jobs:
 
   package:
     name: Package (cargo publish --dry-run)
+    env:
+      RUSTFLAGS: -Dwarnings
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
