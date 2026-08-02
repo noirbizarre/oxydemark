@@ -115,6 +115,18 @@ rejected, adjust the message to match the convention.
 5. Fill out the PR template; link any related issues.
 6. A maintainer will review and merge once all checks pass.
 
+## Compliance Fixtures
+
+The Comark syntax contract (OMEP-0007) is covered by fixture-driven tests: JSON
+files in [`tests/compliance/`](tests/compliance/) are consumed by both the Rust
+integration test `tests/compliance.rs` and the pytest suite
+`tests/test_compliance.py`.
+
+When you change component, slot, prop or nesting behaviour, add a fixture case
+rather than a hand-written test. See
+[`tests/compliance/README.md`](tests/compliance/README.md) for the schema and a
+step-by-step guide.
+
 ## Proposing Changes (OMEPs)
 
 Significant design decisions are tracked as **OMEPs** (OxydeMark Enhancement

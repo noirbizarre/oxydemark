@@ -436,8 +436,16 @@ nests `block_component` nodes as `children`.
 | `:::outer`<br>`::inner`<br>`Content`<br>`::`<br>`:::` | `block_component(name=outer)` → `block_component(name=inner)` → `paragraph` |
 | `::level-1`<br>`:::level-2`<br>`::::level-3`<br>`Content`<br>`::::`<br>`:::`<br>`::` | three-deep `block_component` nesting (`level-1` → `level-2` → `level-3` → `paragraph`) |
 
-The compliance suite lives under `tests/` and extends the existing
-`TestBlockComponents` pattern in `tests/test_core.py`.
+The compliance suite is fixture-driven: JSON files under `tests/compliance/`
+declare a Markdown input, the exact expected HTML and an optional partial AST
+shape. They are consumed by two harnesses running the same files —
+`tests/compliance.rs` (Rust) and `tests/test_compliance.py` (Python) — so both
+language surfaces are held to a single contract. `tests/compliance/README.md`
+documents the schema and how to add a case.
+
+The hand-written unit tests in `src/api.rs` and `tests/test_core.py` are kept
+alongside the fixtures on purpose: the overlap is a deliberate cross-check, not
+an oversight.
 
 ## Implementation Phases
 
