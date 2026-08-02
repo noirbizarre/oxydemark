@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://noirbizarre.github.io/gh-ship/schema/config/v1.json
+#
+# gh-ship configuration (OMEP-0009). gh-ship orchestrates the release; it never
+# bumps versions and never generates changelogs. Those belong to
+# `prepare-release.yml`, which drives git-cliff.
+version: 1
+
+# Branch on which the release is staged. gh-ship moves it onto each staged
+# release commit, so anything pushed here by hand is discarded.
+release_branch: release/next
+
+base_branch: main
+
+workflows:
+  prepare: prepare-release
+  # Deliberately `release`, not `publish-release`: the crates.io and PyPI
+  # Trusted Publishers are bound to the workflow *filename*
+  # `.github/workflows/release.yml`. Renaming this file would make both
+  # registries reject the OIDC token (OMEP-0009).
+  publish: release
+
+pull_request:
+  title: "Release {{ version }}"
+  header: |
+    Prepares OxydeMark **{{ version }}** for release.
+
+    The version is bumped in lockstep across `Cargo.toml`, `pyproject.toml`,
+    `Cargo.lock` and `uv.lock` (OMEP-0008), and `CHANGELOG.md` is regenerated
+    by git-cliff. Review the diff and the notes below, then merge: `gh ship
+    release` tags the merge commit, publishes to crates.io and PyPI, attaches
+    the wheels and sdist, and makes the GitHub Release visible.
+  footer: |
+    ---
+
+    Generated automatically by [gh-ship](https://github.com/noirbizarre/gh-ship).
+    Do not edit `CHANGELOG.md` by hand.
+  labels: [release]
+  reuse: true
+
+release:
+  # gh-ship undrafts once `release.yml` succeeds. Drafting first is what allows
+  # the wheels and sdist to be attached before anyone is notified.
+  draft: true

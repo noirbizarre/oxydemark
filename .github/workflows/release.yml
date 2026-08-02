@@ -1,20 +1,47 @@
-name: Release
+name: 📦 Publish Release
 
+# gh-ship correlates the run it dispatched via this nonce. `gh workflow run`
+# returns no run id, so removing it breaks the correlation.
+run-name: 📦 Publish Release (ship:${{ inputs.ship_id }})
+
+# Dispatched by `gh ship release` *after* it has tagged the merge commit and
+# created the GitHub Release as a draft (OMEP-0009). That ordering is what lets
+# the wheels and sdist be attached before anyone watching the repository is
+# notified; gh-ship undrafts the release once this workflow succeeds.
+#
+# CAUTION: this file must keep the name `release.yml`. The crates.io and PyPI
+# Trusted Publishers are bound to the workflow *filename*, and renaming it
+# makes both registries reject the OIDC token.
 on:
-  push:
-    # Unprefixed semver tags only (e.g. `0.2.0`). GitHub's filter syntax
-    # supports `+` as "one or more of the preceding character", so this rejects
-    # stray non-version tags outright.
-    tags: ["[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      ship_id:
+        description: gh-ship correlation nonce
+        required: true
+        type: string
+      tag:
+        description: The tag being released
+        required: true
+        type: string
 
-# Trusted Publishing (OMEP-0009, option A2): the workflow mints a short-lived
-# crates.io token from GitHub's OIDC identity. No registry secret is stored.
+  workflow_call:
+    inputs:
+      ship_id:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+
+# Trusted Publishing (OMEP-0009, option A2): the workflow mints short-lived
+# crates.io and PyPI tokens from GitHub's OIDC identity. No registry secret is
+# stored. `contents: write` is for attaching assets to the draft release.
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
@@ -23,7 +50,8 @@ env:
 
 jobs:
   # Gate: the tag, Cargo.toml and pyproject.toml must agree on one version
-  # (OMEP-0008 lockstep versioning). Every publish job hangs off this.
+  # (OMEP-0008 lockstep versioning). Every publish job hangs off this. It now
+  # catches a faulty `prepare-release` run rather than a bad manual tag.
   version:
     name: Verify version consistency
     runs-on: ubuntu-latest
@@ -31,12 +59,14 @@ jobs:
       version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Check tag, Cargo.toml and pyproject.toml agree
         id: check
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
+          tag="${{ inputs.tag }}"
           cargo_version="$(cargo metadata --no-deps --format-version 1 \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
           py_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
@@ -57,6 +87,10 @@ jobs:
     environment: release
     steps:
       - uses: actions/checkout@v4
+        with:
+          # gh-ship has already created the tag, so check out exactly what is
+          # being released rather than a branch tip.
+          ref: ${{ inputs.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -98,6 +132,8 @@ jobs:
             target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       # abi3 floor: building with the oldest supported interpreter is what makes
       # the resulting wheel usable on 3.12+.
@@ -135,6 +171,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: actions/setup-python@v5
         with:
@@ -165,7 +203,9 @@ jobs:
     name: Publish to PyPI
     needs: [version, wheels, sdist]
     runs-on: ubuntu-latest
-    # Must match the environment bound to the PyPI Trusted Publisher.
+    # Must match the environment bound to the PyPI Trusted Publisher. Until the
+    # first upload this is a *pending* publisher, which is how a project that
+    # does not yet exist on PyPI is bootstrapped without a manual release.
     environment: release
     permissions:
       id-token: write
@@ -187,5 +227,35 @@ jobs:
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1
 
-  # Future jobs belong in this file, all gated on `needs: version`:
-  #   * github-release        -- issue #26 (needs job-level `contents: write`)
+  # Attaches the same artifacts to the GitHub Release that gh-ship created as a
+  # draft. This must live in this workflow rather than a separate one: gh-ship
+  # undrafts the release only once this run succeeds, so anything uploaded
+  # afterwards would arrive after subscribers were notified.
+  assets:
+    name: Attach release assets
+    needs: [version, wheels, sdist]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # This one *is* a deployment: it is what makes the release tangible. The
+    # `url` registers it in the repository's deployment history.
+    environment:
+      name: release
+      url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: Upload assets to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "${{ inputs.tag }}" dist/* --clobber
