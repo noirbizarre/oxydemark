@@ -10,6 +10,11 @@ extend-exclude = [
   "Cargo.lock",
   "uv.lock",
   "mise.lock",
+  # Generated. Its prose is commit subjects, already spell-checked at
+  # generation time by cliff.toml's `typos --write-changes -` preprocessor,
+  # and the per-commit links embed hex SHAs that read as typos
+  # (e8abd4a -> "abd", 5d4ba79 -> "ba").
+  "CHANGELOG.md",
   # Comark compliance fixtures are verbatim Markdown corpora: their contents
   # are the specification under test, typos included.
   "tests/compliance/**",
