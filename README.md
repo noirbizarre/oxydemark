@@ -1,6 +1,7 @@
 # OxydeMark
 
 [![CI](https://github.com/noirbizarre/oxydemark/actions/workflows/ci.yml/badge.svg)](https://github.com/noirbizarre/oxydemark/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/noirbizarre/oxydemark/graph/badge.svg)](https://codecov.io/gh/noirbizarre/oxydemark)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![prek](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/j178/prek/master/docs/assets/badge-v0.json)](https://github.com/j178/prek)
 

@@ -75,8 +75,24 @@ description = "Install pre-commit hooks via prek"
 run = "prek install"
 
 [tasks.cover]
-description = "Generate code coverage report"
-run = "cargo llvm-cov"
+description = "Generate the Rust coverage report (both feature configurations)"
+# Both configurations are measured and merged: the binding layer (`src/python.rs`)
+# is compiled out of the default build, so a single-configuration run reports it
+# as entirely uncovered (OMEP-0012).
+run = [
+  "cargo llvm-cov clean --workspace",
+  "cargo llvm-cov nextest --no-report",
+  "cargo llvm-cov nextest --no-report --features python",
+  "cargo llvm-cov report --lcov --output-path lcov.info",
+]
+
+[tasks."cover:python"]
+description = "Generate the Python coverage report"
+run = "uv run --group test pytest --cov --cov-report=xml --cov-report=term"
+
+[tasks."cover:all"]
+description = "Generate both the Rust and Python coverage reports"
+depends = ["cover", "cover:python"]
 
 [tasks."publish:check"]
 description = "Verify the crate packages cleanly for crates.io (mirrors CI)"

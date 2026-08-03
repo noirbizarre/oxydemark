@@ -1,0 +1,8 @@
+# CI runs the full suite even after a failure: with a two-configuration Rust
+# matrix (with and without the `python` feature) we want the whole picture of
+# what broke, and a partial run would also upload partial coverage.
+[profile.ci]
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"

@@ -33,6 +33,14 @@ ENV/
 # Build artifacts
 *.whl
 
+# Coverage and test reports
+lcov.info
+coverage.xml
+junit.xml
+.coverage
+.coverage.*
+*.profraw
+
 # Generated documentation site (zensical build + rustdoc)
 /site/
 

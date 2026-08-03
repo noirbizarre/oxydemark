@@ -1,0 +1,83 @@
+# Two independent uploads (Rust and Python) land on every commit. Without
+# this, Codecov judges the project status as soon as the first report settles,
+# comparing a half report against a complete base and reporting a coverage drop
+# that did not happen.
+codecov:
+  notify:
+    after_n_builds: 2
+
+coverage:
+  range: "80...100"
+  status:
+    project:
+      default:
+        # Target coverage percentage
+        target: auto
+        # Maximum allowed coverage drop (0.5%)
+        threshold: 0.5%
+    patch:
+      default:
+        # Require 80% coverage on new code
+        target: 80%
+        # No threshold for patch (strict)
+        threshold: 0%
+
+# Both legs run on every commit, so a missing report means a broken run, not an
+# untested language -- nothing should be carried forward to hide it.
+flag_management:
+  individual_flags:
+    - name: rust
+      paths:
+        - src/
+      carryforward: false
+    - name: python
+      paths:
+        - python/
+      carryforward: false
+
+# Components mirror the pipeline stages of OMEP-0001, so a regression is
+# attributed to a layer rather than to "the repository" (OMEP-0012).
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+        threshold: 1%
+  individual_components:
+    - component_id: core
+      name: Core API
+      paths:
+        - src/lib.rs
+        - src/api.rs
+        - src/error.rs
+        - src/slug.rs
+    - component_id: ast
+      name: AST
+      paths:
+        - src/ast.rs
+    - component_id: extensions
+      name: Comark extensions
+      paths:
+        - src/extensions.rs
+    - component_id: renderer
+      name: HTML renderer
+      paths:
+        - src/html_render.rs
+    - component_id: bindings
+      name: PyO3 bindings
+      paths:
+        - src/python.rs
+    - component_id: python-api
+      name: Python API
+      paths:
+        - python/oxydemark/*.py
+    - component_id: python-contrib
+      name: Python contrib plugins
+      paths:
+        - python/oxydemark/contrib/**
+
+# Require any change in coverage to post
+comment:
+  require_changes: true
+  # Held back for the same reason as the status above.
+  after_n_builds: 2

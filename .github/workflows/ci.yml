@@ -48,10 +48,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
+          components: llvm-tools-preview
 
       - uses: Swatinem/rust-cache@v2
 
       - uses: taiki-e/install-action@nextest
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
 
       # `--features python` links libpython through the `auto-initialize`
       # dev-dependency, so an interpreter must be available.
@@ -59,11 +62,34 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Both configurations feed the same profile data: the binding layer
+      # (`src/python.rs`) is compiled out of the default build and would
+      # otherwise be reported as entirely uncovered (OMEP-0012).
       - name: Run tests (no python feature)
-        run: cargo nextest run
+        run: cargo llvm-cov nextest --profile ci --no-report
 
       - name: Run tests (python feature)
-        run: cargo nextest run --features python
+        run: cargo llvm-cov nextest --profile ci --no-report --features python
+
+      - name: Build the coverage report
+        run: cargo llvm-cov report --lcov --output-path lcov.info
+
+      # A single leg uploads: the nightly leg proves the code still compiles
+      # and passes there, but its report would be identical and would only add
+      # latency to Codecov's `after_n_builds` bookkeeping.
+      - name: Upload coverage to Codecov
+        if: matrix.toolchain == 'stable'
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          flags: rust
+
+      - name: Upload test results to Codecov
+        if: ${{ matrix.toolchain == 'stable' && !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          directory: target/nextest/ci
+          report_type: test_results
 
   build:
     name: Build
@@ -123,7 +149,25 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Run Python tests
-        run: uv run --group test pytest -q
+        run: >-
+          uv run --group test pytest -q
+          --cov --cov-report=xml --junitxml=junit.xml
+
+      # A single interpreter uploads: the other legs run the same suite over the
+      # same sources, so their reports would be identical (OMEP-0012).
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v7
+        with:
+          files: coverage.xml
+          flags: python
+
+      - name: Upload test results to Codecov
+        if: ${{ matrix.python-version == '3.12' && !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          files: junit.xml
+          report_type: test_results
 
       - name: Type-check public API (ty)
         run: uv run --group typing ty check

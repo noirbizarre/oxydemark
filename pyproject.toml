@@ -32,7 +32,7 @@ Repository = "https://github.com/noirbizarre/oxydemark"
 Issues = "https://github.com/noirbizarre/oxydemark/issues"
 
 [dependency-groups]
-test = ["pytest>=9"]
+test = ["pytest>=9", "pytest-cov>=7"]
 typing = ["ty>=0.0.58"]
 bench = ["pytest>=9", "pytest-benchmark>=5", "markdown-it-py>=3", "markdown>=3"]
 docs = ["zensical>=0.0.11", "mkdocstrings-python>=1.11"]
@@ -49,8 +49,25 @@ module-name = "oxydemark._core"
 # in the wheel (OMEP-0008), independently of maturin's default packaging.
 include = ["python/oxydemark/py.typed", "python/oxydemark/_core.pyi"]
 
-[tool.pytest]
+[tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["oxydemark"]
+branch = true
+
+[tool.coverage.paths]
+# `uv run` installs the project into the environment, so measurements are
+# recorded against `site-packages`. Remap them onto the source tree, otherwise
+# the uploaded report does not match the paths the Codecov components declare
+# (OMEP-0012).
+source = ["python/oxydemark", "*/site-packages/oxydemark"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
 
 [tool.ty.src]
 include = ["python/oxydemark"]
