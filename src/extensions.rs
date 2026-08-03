@@ -13,9 +13,8 @@ use std::fmt;
 
 use std::collections::HashSet;
 
-use rushdown::ast::{
-    self, Arena, BlockText, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, pp_indent,
-};
+use rushdown::as_kind_data;
+use rushdown::ast::{self, Arena, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, pp_indent};
 use rushdown::parser::{
     self, BlockParser, Context, InlineParser, NoParserOptions, Parser, ParserExtension, State,
 };
@@ -25,7 +24,6 @@ use rushdown::renderer::{
     RenderNode, TextWrite,
 };
 use rushdown::text::{self, Reader};
-use rushdown::{as_kind_data, as_type_data};
 use rushdown_emoji::Emoji;
 use rushdown_meta::{MetaParserOptions, meta_parser_extension};
 
@@ -933,8 +931,10 @@ pub(crate) fn parse_component_attributes(attr_str: &str, node: &mut ast::Node) {
                 i += 1;
             }
             if i > start {
-                node.attributes_mut()
-                    .insert("id", text::Value::from(input[start..i].to_string()));
+                node.attributes_mut().insert(
+                    "id",
+                    text::MultilineValue::from(input[start..i].to_string()),
+                );
             }
         } else {
             // Key=value pair.
@@ -974,19 +974,19 @@ pub(crate) fn parse_component_attributes(attr_str: &str, node: &mut ast::Node) {
                     &input[val_start..i]
                 };
                 node.attributes_mut()
-                    .insert(key, text::Value::from(value.to_string()));
+                    .insert(key, text::MultilineValue::from(value.to_string()));
             } else {
                 // Boolean prop: `:`-prefixed with value "true" (OMEP-0007).
                 let key = format!(":{key}");
                 node.attributes_mut()
-                    .insert(key, text::Value::from("true".to_string()));
+                    .insert(key, text::MultilineValue::from("true".to_string()));
             }
         }
     }
 
     if !classes.is_empty() {
         node.attributes_mut()
-            .insert("class", text::Value::from(classes.join(" ")));
+            .insert("class", text::MultilineValue::from(classes.join(" ")));
     }
 }
 
@@ -1036,7 +1036,7 @@ pub(crate) fn assign_heading_anchors(arena: &mut Arena, root: NodeRef, source: &
         let slug = crate::slug::slugify_unique(&text, &mut used);
         arena[heading_ref]
             .attributes_mut()
-            .insert("id", text::Value::from(slug));
+            .insert("id", text::MultilineValue::from(slug));
     }
 }
 
@@ -1096,19 +1096,17 @@ fn collect_heading_text(arena: &Arena, node_ref: NodeRef, source: &str, out: &mu
 /// `<!-- more -->`, `<!--more-->`, and `<!--   MORE   -->` all match. Both the
 /// block form (`HtmlBlock`, its own line) and an inline `RawHtml` comment are
 /// recognised; the block form is the idiomatic case and its raw text is read
-/// directly from the arena because it is not surfaced through `str(source)`.
+/// from the node's own `text::Lines` because it is not surfaced through
+/// `str(source)`.
 pub(crate) fn is_more_marker(arena: &Arena, node_ref: NodeRef, source: &str) -> bool {
     let raw = match arena[node_ref].kind_data() {
-        KindData::HtmlBlock(block) => match block.value() {
-            BlockText::Source => {
-                let mut text = String::new();
-                for line in as_type_data!(arena, node_ref, Block).source().iter() {
-                    text.push_str(&line.str(source));
-                }
-                text
+        KindData::HtmlBlock(block) => {
+            let mut text = String::new();
+            for line in block.value().iter(source) {
+                text.push_str(&line);
             }
-            BlockText::Owned(value) => value.clone(),
-        },
+            text
+        }
         KindData::RawHtml(html) => html.str(source).to_string(),
         _ => return false,
     };

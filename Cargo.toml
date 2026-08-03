@@ -66,9 +66,16 @@ extension-module = ["python", "pyo3/extension-module", "pyo3/abi3-py312"]
 
 [dependencies]
 pyo3 = { version = "0.28", optional = true }
-rushdown = "0.11"
-rushdown-meta = "0.9"
-rushdown-emoji = "0.9"
+rushdown = "0.18"
+# CAUTION: `rushdown-meta`/`rushdown-emoji` bump their own `rushdown`
+# requirement across *patch* releases (0.9.3 -> ^0.11, 0.9.9 -> ^0.18), so a
+# caret requirement here silently pulls a second, incompatible `rushdown` into
+# a downstream graph (issue #33). The exact pin is the only faithful expression
+# of the constraint: moving `rushdown` is a deliberate, released decision --
+# `rushdown::ast::Meta` is part of oxydemark's public API, so a `rushdown` major
+# bump is a breaking change for us too.
+rushdown-meta = "=0.9.9"
+rushdown-emoji = "=0.9.8"
 unicode-normalization = "0.1"
 
 [dev-dependencies]
@@ -85,4 +92,4 @@ serde_json = "1"
 # Already a regular dependency; re-declared so `tests/compliance.rs` can name
 # `rushdown::ast::Meta` when matching typed component props. Cargo unifies both
 # requirements to a single version.
-rushdown = "0.11"
+rushdown = "0.18"

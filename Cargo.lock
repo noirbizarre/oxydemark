@@ -246,9 +246,9 @@ dependencies = [
 
 [[package]]
 name = "rushdown"
-version = "0.11.2"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41192d19d2073ce9422c334a4bae7f51bde5ac275e082d9f4ab7b6b14093c4"
+checksum = "57358ca9b61ea373ec6bf1c9e916f521f19a919587d9179624d47c40da2ffc5d"
 dependencies = [
  "bitflags",
  "memchr",
@@ -258,9 +258,9 @@ dependencies = [
 
 [[package]]
 name = "rushdown-emoji"
-version = "0.9.2"
+version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1bd2ac4c184f0ed101bf5494c856250d63bbbb3e7b7915472b37ebeb29368de"
+checksum = "7d0d90b1caec780e68787c86120412b919523742ee09a44886030816892e5bb0"
 dependencies = [
  "emojis",
  "rushdown",
@@ -268,9 +268,9 @@ dependencies = [
 
 [[package]]
 name = "rushdown-meta"
-version = "0.9.3"
+version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3373b74fb77a362b53741a02a39f79ccb91634f76ffb193294006b1fcc8a3f83"
+checksum = "edac26161c43766c168e7e3d2ae85708d9abf6ffe96181e0c8a3a0051b934dbd"
 dependencies = [
  "rushdown",
  "yaml-peg",

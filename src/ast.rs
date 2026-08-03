@@ -602,7 +602,7 @@ pub(crate) fn document_meta(arena: &ast::Arena, document_ref: NodeRef) -> Option
 
 /// Map a rushdown `KindData` variant to a human-readable kind string.
 ///
-/// Emphasis level 1 maps to "emphasis", level 2 maps to "strong".
+/// `Emphasis` maps to "emphasis" and `Strong` to "strong".
 /// Extension nodes (emoji, components) are detected via downcast.
 fn kind_name(node: &ast::Node) -> &'static str {
     match node.kind_data() {
@@ -616,13 +616,8 @@ fn kind_name(node: &ast::Node) -> &'static str {
         KindData::HtmlBlock(_) => "html_block",
         KindData::ThematicBreak(_) => "thematic_break",
         KindData::Text(_) => "text",
-        KindData::Emphasis(e) => {
-            if e.level() >= 2 {
-                "strong"
-            } else {
-                "emphasis"
-            }
-        }
+        KindData::Emphasis(_) => "emphasis",
+        KindData::Strong(_) => "strong",
         KindData::Link(_) => "link",
         KindData::Image(_) => "image",
         KindData::CodeSpan(_) => "code_span",
@@ -685,9 +680,14 @@ const RAW_HTML_PLACEHOLDER: &str = "<!-- raw HTML omitted -->";
 /// `RawHtml` and `HtmlBlock` yield [`RAW_HTML_PLACEHOLDER`] rather than the
 /// source markup (the block form keeps rushdown's trailing newline).
 /// `Emoji` extension nodes produce their Unicode character.
+///
+/// `CodeSpan` carries its content inline (rushdown 0.18 dropped the child
+/// `Text` node), so its value is surfaced here to keep the exposed tree -- and
+/// therefore [`crate::api::render_ast`] -- unchanged for plugin authors.
 fn node_text(node: &ast::Node, source: &str) -> Option<String> {
     match node.kind_data() {
         KindData::Text(t) => Some(t.str(source).to_string()),
+        KindData::CodeSpan(c) => Some(c.str(source).to_string()),
         KindData::RawHtml(_) => Some(RAW_HTML_PLACEHOLDER.to_string()),
         KindData::HtmlBlock(_) => Some(format!("{RAW_HTML_PLACEHOLDER}\n")),
         KindData::Extension(ext) => (ext.as_ref() as &dyn std::any::Any)
@@ -728,13 +728,13 @@ fn node_attributes(node: &ast::Node, source: &str) -> HashMap<String, String> {
                 "href".to_string(),
                 link.destination().str(source).to_string(),
             );
-            if let Some(title) = link.title().filter(|t| !t.is_empty()) {
+            if let Some(title) = link.title().filter(|t| !t.str(source).is_empty()) {
                 attrs.insert("title".to_string(), title.str(source).to_string());
             }
         }
         KindData::Image(img) => {
             attrs.insert("src".to_string(), img.destination().str(source).to_string());
-            if let Some(title) = img.title().filter(|t| !t.is_empty()) {
+            if let Some(title) = img.title().filter(|t| !t.str(source).is_empty()) {
                 attrs.insert("title".to_string(), title.str(source).to_string());
             }
         }

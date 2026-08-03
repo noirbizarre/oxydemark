@@ -363,6 +363,22 @@ mod tests {
         assert!(para.children.iter().any(|c| c.kind == "code_span"));
     }
 
+    /// rushdown 0.18 moved the code span content from a child `Text` node onto
+    /// the `CodeSpan` node itself. Plugins and `render_ast` read it through
+    /// `AstNode::text`, so it must stay populated (issue #33).
+    #[test]
+    fn parse_code_span_exposes_its_text() {
+        let ast = parse("Use `code` here");
+        let para = &ast.children[0];
+        let span = para
+            .children
+            .iter()
+            .find(|c| c.kind == "code_span")
+            .expect("code span");
+        assert_eq!(span.text.as_deref(), Some("code"));
+        assert!(render_ast(&ast).contains("<code>code</code>"));
+    }
+
     #[test]
     fn parse_strikethrough() {
         let ast = parse("~~deleted~~");
