@@ -8,6 +8,8 @@ from oxydemark._core import parse as _parse
 from oxydemark._core import render_ast as _render_ast
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from oxydemark._core import AstNode
 
 
@@ -182,26 +184,41 @@ class OxydeEngine:
         Returns:
             The final HTML, after every plugin hook has run.
         """
+        # Hooks are looked up by name rather than by `isinstance`, so a plugin
+        # only implements what it needs. `Plugin` is a union of single-hook
+        # protocols, so the lookups are written as `getattr` -- narrowing a
+        # union member that does not declare the attribute would otherwise
+        # leave it statically untyped.
+
         # 1. Preprocessing: text-level plugins.
         text = markdown
         for plugin in self.plugins:
-            if hasattr(plugin, "preprocess"):
-                text = plugin.preprocess(text)
+            preprocess: Callable[[str], str] | None = getattr(
+                plugin, "preprocess", None
+            )
+            if preprocess is not None:
+                text = preprocess(text)
 
         # 2. Parse Markdown to AST (Rust / rushdown).
         ast = _parse(text)
 
         # 3. AST transformation: AST-level plugins.
         for plugin in self.plugins:
-            if hasattr(plugin, "transform"):
-                ast = plugin.transform(ast)
+            transform: Callable[[AstNode], AstNode] | None = getattr(
+                plugin, "transform", None
+            )
+            if transform is not None:
+                ast = transform(ast)
 
         # 4. Render AST to HTML (Rust renderer).
         html = _render_ast(ast)
 
         # 5. Postprocessing: HTML-level plugins.
         for plugin in self.plugins:
-            if hasattr(plugin, "postprocess"):
-                html = plugin.postprocess(html)
+            postprocess: Callable[[str], str] | None = getattr(
+                plugin, "postprocess", None
+            )
+            if postprocess is not None:
+                html = postprocess(html)
 
         return html
