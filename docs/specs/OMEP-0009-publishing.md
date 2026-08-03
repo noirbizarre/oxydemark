@@ -168,6 +168,37 @@ The release is driven by three workflows plus `.github/ship.yml`:
   workflow exchanges its OIDC token for a short-lived crates.io token; no
   `CARGO_REGISTRY_TOKEN` secret is stored.
 
+### Publish ordering and idempotency *(amended)*
+
+Publishing is irreversible on both indexes: neither permits replacing a
+released version, so a release that reaches one index and fails on the other
+cannot be repaired -- the version has to be abandoned in favour of the next
+patch. The pipeline is therefore ordered to make a partial release as unlikely
+as possible, and recoverable when it happens anyway.
+
+* **Nothing publishes until everything builds.** `crates-io` is gated on
+  `wheels` and `sdist` as well as `version`, so a cross-compilation failure
+  cannot strand a published crate against wheels that never existed.
+* **The publishes are serialised, riskiest first.** `crates-io` is gated on
+  `pypi`. PyPI is the riskier leg: its Trusted Publisher begins as a *pending*
+  publisher against a project that does not exist yet, whereas crates.io
+  publishes a new version of an existing crate through an already-bound
+  publisher, with packaging proven by `cargo publish --dry-run` in the pull
+  request CI. Running PyPI first means the likely failure happens while
+  crates.io is still untouched and the version number is still free.
+* **Both publishes are idempotent**, because serialising them means recovering
+  from a crates.io failure requires re-running the whole workflow:
+  * the PyPI upload sets `skip-existing: true`, so re-uploading files the index
+    already has is a no-op rather than an error;
+  * the crates.io job first queries `GET /api/v1/crates/oxydemark/{version}` and
+    skips publishing on `200`. crates.io rejects requests without a
+    `User-Agent`, and an unexpected status fails the job loudly rather than
+    guessing -- silently treating an error as "already published" would skip a
+    real release.
+* The `assets` job stays parallel to the publishes: gh-ship only undrafts the
+  GitHub Release when the whole workflow succeeds, so a failed publish leaves a
+  draft release carrying its artifacts, which is what you want for diagnosis.
+
 ### PyPI wheel/sdist matrix
 
 Built with maturin (via `PyO3/maturin-action`) and published to PyPI.
@@ -181,8 +212,8 @@ The matrix therefore varies by target only:
 | ------ | ------ |
 | `ubuntu-latest` | `x86_64-unknown-linux-gnu` (manylinux) |
 | `ubuntu-latest` | `aarch64-unknown-linux-gnu` (manylinux, cross) |
-| `macos-13` | `x86_64-apple-darwin` |
-| `macos-14` | `aarch64-apple-darwin` |
+| `macos-15` | `x86_64-apple-darwin` (cross-compiled) |
+| `macos-15` | `aarch64-apple-darwin` |
 | `windows-latest` | `x86_64-pc-windows-msvc` |
 
 * `abi3-py312` is gated on `extension-module`, not on `python`, so
@@ -255,6 +286,9 @@ surface has stabilised.
 * Bad, because gh-ship reintroduces one stored secret (`SHIP_TOKEN`) after A2
   had removed all of them, and adds a third-party dependency to the release
   path.
+* Bad, because serialising the two publishes to avoid a half-released version
+  makes the release workflow strictly slower: crates.io now waits for the whole
+  wheel matrix and the PyPI upload rather than publishing immediately.
 * Neutral, because deferring the CLI keeps scope small now but leaves a
   frequently-requested convenience for later.
 
