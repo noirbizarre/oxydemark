@@ -127,9 +127,9 @@ pyproject.toml          # maturin build backend
 | ---------- | ---- |
 | PyO3 0.28 | Rust ↔ Python FFI bindings |
 | maturin | Build backend for mixed Rust/Python packages |
-| rushdown 0.11 | Markdown parser and HTML renderer (CommonMark + GFM) |
-| rushdown-meta 0.9 | YAML frontmatter extension |
-| rushdown-emoji 0.9 | Emoji shortcode extension |
+| rushdown 0.18 | Markdown parser and HTML renderer (CommonMark + GFM) |
+| rushdown-meta =0.9.9 | YAML frontmatter extension |
+| rushdown-emoji =0.9.8 | Emoji shortcode extension |
 
 See also: [PyO3 User Guide](https://pyo3.rs/),
 [maturin docs](https://www.maturin.rs/),

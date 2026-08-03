@@ -109,9 +109,9 @@ The following rushdown extensions are adopted as initial dependencies:
 
 | Crate | Version | Role |
 | ----- | ------- | ---- |
-| `rushdown` | 0.11 | Core parser and HTML renderer |
-| `rushdown-meta` | 0.9 | YAML frontmatter parsing |
-| `rushdown-emoji` | 0.9 | `:shortcode:` emoji support (parser + renderer) |
+| `rushdown` | 0.18 | Core parser and HTML renderer |
+| `rushdown-meta` | =0.9.9 | YAML frontmatter parsing |
+| `rushdown-emoji` | =0.9.8 | `:shortcode:` emoji support (parser + renderer) |
 
 Additional extensions available for future integration:
 
@@ -120,6 +120,41 @@ Additional extensions available for future integration:
 | `rushdown-footnote` | Footnote syntax |
 | `rushdown-highlighting` | Syntax highlighting for code blocks |
 | `rushdown-diagram` | Diagram visualization (e.g. MermaidJS) |
+
+### Dependency pinning
+
+`rushdown-meta` and `rushdown-emoji` raise their own `rushdown` requirement
+across **patch** releases of a single minor line (`rushdown-meta` 0.9.3 requires
+`rushdown ^0.11`, 0.9.9 requires `^0.18`). A caret requirement such as
+`rushdown-meta = "0.9"` is therefore not expressible: it floats to the newest
+patch, which demands a `rushdown` major we do not use, and Cargo resolves *two*
+incompatible `rushdown` copies into the downstream graph. The repository's own
+`Cargo.lock` hides this, because lockfiles are not honoured for library
+consumers — which is exactly how a published `oxydemark` 0.2 shipped
+uncompilable downstream (issue #33).
+
+The companion crates are consequently pinned **exactly**:
+
+```toml
+rushdown = "0.18"
+rushdown-meta = "=0.9.9"
+rushdown-emoji = "=0.9.8"
+```
+
+The exact pin is not conservatism, it is the only faithful expression of the
+constraint. `rushdown::ast::Meta` is part of oxydemark's public API
+(`ParseResult::frontmatter`, `AstNode::props`), so a `rushdown` major bump is a
+breaking change for oxydemark too and must be a deliberate, released decision.
+
+Two CI guards keep this honest:
+
+* the `package` job in `ci.yml` runs `cargo update && cargo build`, reproducing
+  the fresh resolution a downstream consumer performs — it fails if the pins are
+  ever loosened back to a caret;
+* `deps.yml` runs weekly on nightly with `cargo update --breaking`, deliberately
+  breaking the pins. A red run means a new `rushdown` line is out and an upgrade
+  is due. It is not attached to pull requests, so upstream releases never break
+  contributor CI.
 
 ## More Information
 
