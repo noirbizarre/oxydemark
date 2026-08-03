@@ -1,11 +1,12 @@
 //! Comark compliance suite (OMEP-0007 Phase 3).
 //!
-//! Data-driven tests over the JSON fixtures in `tests/compliance/`. Every case
-//! asserts the exact HTML produced by *both* render paths — the rushdown fast
-//! path and the standalone [`render_ast`] renderer, mirroring the
-//! `assert_both_paths` helper of the unit tests — and, optionally, a *partial*
-//! AST shape: keys absent from a fixture are never asserted, so additive AST
-//! changes cannot break the suite.
+//! Data-driven tests over the fixtures in `tests/compliance/`, written either
+//! as delimited Markdown (`*.md`) or as JSON (`*.json`). Every case asserts the
+//! exact HTML produced by *both* render paths — the rushdown fast path and the
+//! standalone [`render_ast`] renderer, mirroring the `assert_both_paths` helper
+//! of the unit tests — and, optionally, a *partial* AST shape: keys absent from
+//! a fixture are never asserted, so additive AST changes cannot break the
+//! suite.
 //!
 //! The same fixtures drive `tests/test_compliance.py`. See
 //! `tests/compliance/README.md` for the schema and for how to add a case.
@@ -286,6 +287,190 @@ fn child_kinds(node: &AstNode) -> Vec<&str> {
 }
 
 // ---------------------------------------------------------------------------
+// Delimited-markdown fixture parser
+// ---------------------------------------------------------------------------
+
+/// A fence opener: the number of backticks and the info string.
+struct Fence<'a> {
+    backticks: usize,
+    info: &'a str,
+}
+
+/// Recognise a fence line, i.e. a run of at least three backticks optionally
+/// followed by an info string.
+fn fence(line: &str) -> Option<Fence<'_>> {
+    let trimmed = line.trim_start();
+    let backticks = trimmed.chars().take_while(|c| *c == '`').count();
+    if backticks < 3 {
+        return None;
+    }
+    let info = trimmed[backticks..].trim();
+    // An info string may not itself contain a backtick (CommonMark).
+    if info.contains('`') {
+        return None;
+    }
+    Some(Fence { backticks, info })
+}
+
+/// Parse a delimited-markdown fixture file.
+///
+/// See `tests/compliance/README.md` for the grammar. Returns a human-readable
+/// message on the first structural error; the caller prefixes it with the file
+/// name.
+fn parse_markdown_fixture(source: &str) -> Result<Fixture, String> {
+    let mut description = String::new();
+    let mut reference: Option<String> = None;
+    let mut cases: Vec<Case> = Vec::new();
+    let mut current: Option<Draft> = None;
+
+    let lines: Vec<&str> = source.lines().collect();
+    let mut index = 0usize;
+
+    while index < lines.len() {
+        let line = lines[index];
+
+        if let Some(name) = line.strip_prefix("## ") {
+            if let Some(draft) = current.take() {
+                cases.push(draft.finish()?);
+            }
+            let name = name.trim().to_string();
+            if name.is_empty() {
+                return Err(format!("line {}: empty case name", index + 1));
+            }
+            current = Some(Draft {
+                name,
+                prose: Vec::new(),
+                markdown: None,
+                html: None,
+                ast: None,
+            });
+            index += 1;
+            continue;
+        }
+
+        if let Some(opener) = fence(line) {
+            let (body, next) = read_block(&lines, index, &opener)?;
+            let Some(draft) = current.as_mut() else {
+                return Err(format!(
+                    "line {}: fenced block {:?} outside of a case",
+                    index + 1,
+                    opener.info
+                ));
+            };
+            let name = &draft.name;
+            let slot = match opener.info {
+                "comark" => &mut draft.markdown,
+                "html" => &mut draft.html,
+                "json ast" => &mut draft.ast,
+                other => {
+                    return Err(format!(
+                        "{name}: unsupported fence info string {other:?} \
+                         (expected `comark`, `html` or `json ast`)"
+                    ));
+                }
+            };
+            if slot.is_some() {
+                return Err(format!("{}: duplicate `{}` block", draft.name, opener.info));
+            }
+            *slot = Some(body);
+            index = next;
+            continue;
+        }
+
+        match current.as_mut() {
+            // Prose inside a case, before its first fence, is its description.
+            Some(draft) if draft.markdown.is_none() => draft.prose.push(line.to_string()),
+            Some(_) => {}
+            None => {
+                if let Some(rest) = line.strip_prefix("Reference:") {
+                    reference = Some(rest.trim().to_string());
+                } else if !line.starts_with('#') {
+                    description.push_str(line);
+                    description.push('\n');
+                }
+            }
+        }
+        index += 1;
+    }
+
+    if let Some(draft) = current.take() {
+        cases.push(draft.finish()?);
+    }
+    if cases.is_empty() {
+        return Err("no case found (expected at least one `## <name>` heading)".to_string());
+    }
+
+    Ok(Fixture {
+        description: description.trim().to_string(),
+        reference,
+        cases,
+    })
+}
+
+/// Read the body of the block opened at `start`, returning it and the index of
+/// the line following the closing fence.
+fn read_block(lines: &[&str], start: usize, opener: &Fence<'_>) -> Result<(String, usize), String> {
+    let mut body = String::new();
+    let mut index = start + 1;
+    while index < lines.len() {
+        if let Some(closer) = fence(lines[index])
+            && closer.info.is_empty()
+            && closer.backticks >= opener.backticks
+        {
+            return Ok((body, index + 1));
+        }
+        body.push_str(lines[index]);
+        body.push('\n');
+        index += 1;
+    }
+    Err(format!(
+        "line {}: unterminated `{}` block",
+        start + 1,
+        opener.info
+    ))
+}
+
+/// A case under construction: its name, the prose collected before the first
+/// fence, and the raw bodies of its blocks.
+struct Draft {
+    name: String,
+    prose: Vec<String>,
+    markdown: Option<String>,
+    html: Option<String>,
+    ast: Option<String>,
+}
+
+impl Draft {
+    /// Validate the draft and turn it into a [`Case`].
+    fn finish(self) -> Result<Case, String> {
+        let Draft {
+            name,
+            prose,
+            markdown,
+            html,
+            ast,
+        } = self;
+        let markdown = markdown.ok_or_else(|| format!("{name}: missing `comark` block"))?;
+        let html = html.ok_or_else(|| format!("{name}: missing `html` block"))?;
+        let ast = ast
+            .map(|raw| {
+                serde_json::from_str::<NodeSpec>(&raw)
+                    .map_err(|error| format!("{name}: invalid `json ast` block: {error}"))
+            })
+            .transpose()?;
+
+        let description = prose.join("\n").trim().to_string();
+        Ok(Case {
+            name,
+            description: (!description.is_empty()).then_some(description),
+            markdown,
+            html,
+            ast,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Driver
 // ---------------------------------------------------------------------------
 
@@ -314,8 +499,10 @@ fn comark_compliance_suite() {
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", dir.display()))
         .map(|entry| entry.expect("cannot read directory entry").path())
         .filter(|path| {
-            path.extension()
-                .is_some_and(|extension| extension == "json")
+            path.file_name().is_some_and(|name| name != "README.md")
+                && path
+                    .extension()
+                    .is_some_and(|extension| extension == "json" || extension == "md")
         })
         .collect();
     files.sort();
@@ -327,6 +514,7 @@ fn comark_compliance_suite() {
 
     let mut failures: Vec<String> = Vec::new();
     let mut total = 0usize;
+    let mut stems: Vec<String> = Vec::new();
 
     for file in &files {
         let stem = file
@@ -334,10 +522,20 @@ fn comark_compliance_suite() {
             .expect("fixture path has a file name")
             .to_string_lossy()
             .into_owned();
+        assert!(
+            !stems.contains(&stem),
+            "duplicate fixture name {stem:?}: test ids would collide"
+        );
+        stems.push(stem.clone());
         let raw = fs::read_to_string(file)
             .unwrap_or_else(|error| panic!("cannot read {}: {error}", file.display()));
-        let fixture: Fixture = serde_json::from_str(&raw)
-            .unwrap_or_else(|error| panic!("invalid fixture {}: {error}", file.display()));
+        let fixture: Fixture = if file.extension().is_some_and(|extension| extension == "md") {
+            parse_markdown_fixture(&raw)
+                .unwrap_or_else(|error| panic!("invalid fixture {}: {error}", file.display()))
+        } else {
+            serde_json::from_str(&raw)
+                .unwrap_or_else(|error| panic!("invalid fixture {}: {error}", file.display()))
+        };
 
         let mut seen: Vec<&str> = Vec::new();
         for case in &fixture.cases {

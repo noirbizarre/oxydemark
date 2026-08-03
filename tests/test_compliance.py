@@ -1,17 +1,19 @@
-"""Comark compliance suite driven by the shared JSON fixtures (OMEP-0007).
+"""Comark compliance suite driven by the shared fixtures (OMEP-0007).
 
 The fixtures in ``tests/compliance/`` are the single source of truth for the
 Comark behaviour contract; the Rust integration test in ``tests/compliance.rs``
-consumes the very same files. Each case asserts the exact HTML produced by both
+consumes the very same files, in either the delimited-markdown (``*.md``) or
+the JSON (``*.json``) format. Each case asserts the exact HTML produced by both
 render paths and, optionally, a *partial* AST expectation: keys absent from a
 fixture are never asserted, so additive AST changes cannot break the suite.
 
-See ``tests/compliance/README.md`` for the schema and for how to add a case.
+See ``tests/compliance/README.md`` for the formats and for how to add a case.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +24,132 @@ from oxydemark import AstNode
 
 FIXTURES_DIR = Path(__file__).parent / "compliance"
 
+#: A fence opener or closer: at least three backticks plus an info string.
+FENCE_RE = re.compile(r"^\s*(?P<backticks>`{3,})(?P<info>[^`]*)$")
+
+#: Fence info string -> the case key it feeds.
+FENCE_KEYS = {"comark": "markdown", "html": "html", "json ast": "ast"}
+
 type Case = dict[str, Any]
 type NodeSpec = dict[str, Any]
+
+
+def _finish_case(name: str, prose: list[str], blocks: dict[str, str]) -> Case:
+    """Validate an in-progress markdown fixture case and materialise it.
+
+    Args:
+        name: The case name, from its ``##`` heading.
+        prose: The lines collected before the first fenced block.
+        blocks: The fenced block bodies, keyed by case key.
+
+    Returns:
+        A case in the same shape as a JSON fixture case. The ``ast`` key is
+        only present when the fixture declared a ``json ast`` block, so the
+        absent-versus-``null`` distinction is preserved.
+
+    Raises:
+        AssertionError: If a required block is missing.
+    """
+    assert "markdown" in blocks, f"{name}: missing `comark` block"
+    assert "html" in blocks, f"{name}: missing `html` block"
+
+    case: Case = {"name": name, "markdown": blocks["markdown"], "html": blocks["html"]}
+    if description := "\n".join(prose).strip():
+        case["description"] = description
+    if (raw := blocks.get("ast")) is not None:
+        try:
+            case["ast"] = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise AssertionError(f"{name}: invalid `json ast` block: {error}") from error
+    return case
+
+
+def _parse_markdown_fixture(source: str) -> list[Case]:
+    """Parse a delimited-markdown fixture file into its cases.
+
+    The grammar is documented in ``tests/compliance/README.md``: a ``##``
+    heading opens a case, the prose that follows is its description, and the
+    ``comark`` / ``html`` / ``json ast`` fenced blocks carry its data. Fences
+    are CommonMark-like, so a longer run of backticks may wrap a fixture that
+    itself contains a fenced block.
+
+    Args:
+        source: The whole fixture file.
+
+    Returns:
+        The declared cases, in file order.
+
+    Raises:
+        AssertionError: On any structural error.
+    """
+    lines = source.splitlines()
+    cases: list[Case] = []
+    name: str | None = None
+    prose: list[str] = []
+    blocks: dict[str, str] = {}
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+
+        if line.startswith("## "):
+            if name is not None:
+                cases.append(_finish_case(name, prose, blocks))
+            name = line[3:].strip()
+            assert name, f"line {index + 1}: empty case name"
+            prose, blocks = [], {}
+            index += 1
+            continue
+
+        if match := FENCE_RE.match(line):
+            info = match["info"].strip()
+            assert name is not None, (
+                f"line {index + 1}: fenced block {info!r} outside of a case"
+            )
+            key = FENCE_KEYS.get(info)
+            assert key is not None, (
+                f"{name}: unsupported fence info string {info!r} "
+                "(expected `comark`, `html` or `json ast`)"
+            )
+            assert key not in blocks, f"{name}: duplicate `{info}` block"
+            blocks[key], index = _read_block(lines, index, len(match["backticks"]), info)
+            continue
+
+        if name is not None and "markdown" not in blocks:
+            prose.append(line)
+        index += 1
+
+    if name is not None:
+        cases.append(_finish_case(name, prose, blocks))
+    assert cases, "no case found (expected at least one `## <name>` heading)"
+    return cases
+
+
+def _read_block(lines: list[str], start: int, opener: int, info: str) -> tuple[str, int]:
+    """Read the body of the fenced block opened at ``start``.
+
+    Args:
+        lines: All the lines of the fixture file.
+        start: Index of the opening fence.
+        opener: Length of the opening backtick run.
+        info: The opening info string, for error messages.
+
+    Returns:
+        The block body, newline-terminated, and the index of the line after the
+        closing fence.
+
+    Raises:
+        AssertionError: If the block is never closed.
+    """
+    body: list[str] = []
+    index = start + 1
+    while index < len(lines):
+        match = FENCE_RE.match(lines[index])
+        if match and not match["info"].strip() and len(match["backticks"]) >= opener:
+            return "".join(f"{line}\n" for line in body), index + 1
+        body.append(lines[index])
+        index += 1
+    raise AssertionError(f"line {start + 1}: unterminated `{info}` block")
 
 
 def _load_cases() -> list[tuple[str, Case]]:
@@ -34,17 +160,30 @@ def _load_cases() -> list[tuple[str, Case]]:
         pytest parameter id, ordered by file name then by declaration order.
 
     Raises:
-        AssertionError: If no fixture file is found, or if a file declares two
-            cases with the same name.
+        AssertionError: If no fixture file is found, if two files share a stem,
+            or if a file declares two cases with the same name.
     """
-    files = sorted(FIXTURES_DIR.glob("*.json"))
+    files = sorted(
+        path
+        for path in FIXTURES_DIR.iterdir()
+        if path.suffix in {".json", ".md"} and path.name != "README.md"
+    )
     assert files, f"no compliance fixtures found in {FIXTURES_DIR}"
 
     collected: list[tuple[str, Case]] = []
+    stems: set[str] = set()
     for path in files:
-        fixture = json.loads(path.read_text(encoding="utf-8"))
+        assert path.stem not in stems, (
+            f"duplicate fixture name {path.stem!r}: test ids would collide"
+        )
+        stems.add(path.stem)
+        source = path.read_text(encoding="utf-8")
+        if path.suffix == ".md":
+            cases = _parse_markdown_fixture(source)
+        else:
+            cases = json.loads(source)["cases"]
         names: set[str] = set()
-        for case in fixture["cases"]:
+        for case in cases:
             name = case["name"]
             assert name not in names, f"{path.stem}: duplicate case name {name!r}"
             names.add(name)
