@@ -19,10 +19,20 @@ Markdown Input
 
 ## Installation
 
-!!! note
+```sh
+pip install oxydemark
+```
 
-    OxydeMark is in early development (pre-alpha). Installation from source is
-    currently the only option.
+Wheels are published for Linux, macOS and Windows. As an `abi3-py312` build, a
+single wheel per platform covers Python 3.12 and every later version.
+
+To use the [Rust core](api/rust.md) directly, without any PyO3 dependency:
+
+```sh
+cargo add oxydemark
+```
+
+To build from a checkout instead:
 
 ```sh
 git clone https://github.com/noirbizarre/oxydemark.git

@@ -29,15 +29,24 @@ Markdown Input
 
 ## Installation
 
-> **Note:** OxydeMark is in early development (pre-alpha). Installation from
-> source is currently the only option.
+```sh
+pip install oxydemark
+```
+
+Wheels are published for Linux, macOS and Windows. As an `abi3-py312` build, a
+single wheel per platform covers Python 3.12 and every later version.
+
+To use the Rust core directly, without any PyO3 dependency:
 
 ```sh
-# Clone the repository
+cargo add oxydemark
+```
+
+To build from a checkout instead:
+
+```sh
 git clone https://github.com/noirbizarre/oxydemark.git
 cd oxydemark
-
-# Install tools and build
 mise install
 maturin develop
 ```
@@ -58,6 +67,15 @@ This is **extensible Markdown**.
 html = engine.render(md)
 print(html)
 ```
+
+For a one-shot conversion without the plugin pipeline, use
+[`markdown_to_html`](https://noirbizarre.github.io/oxydemark/api/python/#oxydemark.markdown_to_html);
+to inspect or transform the tree, use
+[`parse`](https://noirbizarre.github.io/oxydemark/api/python/#oxydemark.parse)
+and
+[`render_ast`](https://noirbizarre.github.io/oxydemark/api/python/#oxydemark.render_ast);
+to extract headings, a table of contents, a summary and typed frontmatter, use
+[`parse_document`](https://noirbizarre.github.io/oxydemark/api/python/#oxydemark.parse_document).
 
 ## Plugins
 
@@ -105,19 +123,27 @@ mise run docs         # Build the documentation site
 ```
 oxydemark/
 ├── src/                    # Rust core
-│   ├── lib.rs              # PyO3 module, parser/renderer wiring
+│   ├── lib.rs              # Crate root, public re-exports
+│   ├── api.rs              # Public API, parser/renderer wiring
 │   ├── ast.rs              # AstNode definition, arena-to-tree conversion
 │   ├── extensions.rs       # Comark parser/renderer extensions
-│   └── html_render.rs      # AST-to-HTML renderer
+│   ├── html_render.rs      # AST-to-HTML renderer
+│   ├── slug.rs             # Anchor slug algorithm
+│   ├── error.rs            # OxydeError
+│   └── python.rs           # PyO3 binding layer (`python` feature)
 ├── python/oxydemark/       # Python package
 │   ├── __init__.py         # Re-exports from native module
-│   ├── api.py              # OxydeEngine, plugin protocol
+│   ├── api.py              # OxydeEngine, plugin protocols
+│   ├── _core.pyi           # Type stub for the native module
 │   └── contrib/            # Example plugins (provisional surface)
+├── tests/                  # Rust and Python test suites
+│   └── compliance/         # Shared fixtures, run by both harnesses
+├── benchmarks/             # Markdown library comparison benchmarks
 ├── docs/                   # Documentation site sources
 │   ├── plugins.md          # Plugin authoring guide
 │   ├── api/                # API reference pages
 │   └── specs/              # OMEPs (design decisions)
-├── .github/workflows/      # CI pipeline
+├── .github/workflows/      # CI, docs and release pipelines
 ├── Cargo.toml              # Rust crate configuration
 ├── pyproject.toml          # Python build config (maturin)
 ├── mise.toml               # Task runner and tool versions

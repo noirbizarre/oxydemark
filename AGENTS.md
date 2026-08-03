@@ -27,19 +27,28 @@ Markdown Input
 ```
 oxydemark/
 ├── src/                    # Rust core
-│   ├── lib.rs              # PyO3 module, parser/renderer wiring
+│   ├── lib.rs              # Crate root, public re-exports
+│   ├── api.rs              # Public API, parser/renderer wiring, parser cache
 │   ├── ast.rs              # AstNode definition, arena-to-tree conversion
 │   ├── extensions.rs       # Comark parser/renderer extensions
-│   └── html_render.rs      # AST-to-HTML renderer
+│   ├── html_render.rs      # AST-to-HTML renderer
+│   ├── slug.rs             # Anchor slug algorithm
+│   ├── error.rs            # OxydeError
+│   └── python.rs           # PyO3 binding layer (`python` feature)
 ├── python/oxydemark/       # Python package
 │   ├── __init__.py         # Re-exports from native module
-│   └── api.py              # OxydeEngine class, plugin protocol
+│   ├── api.py              # OxydeEngine class, plugin protocols
+│   ├── _core.pyi           # Type stub for the native module
+│   └── contrib/            # Example plugins (provisional surface)
+├── tests/                  # Rust and Python test suites
+│   └── compliance/         # Shared fixtures, run by both harnesses
+├── benchmarks/             # Markdown library comparison benchmarks
 ├── docs/                   # Documentation site sources (zensical.toml)
 │   ├── index.md            # Landing page
 │   ├── plugins.md          # Plugin authoring guide
 │   ├── api/                # API reference pages (mkdocstrings + rustdoc)
 │   └── specs/              # OMEPs (design decisions, MADR format)
-├── .github/workflows/      # CI + release pipelines
+├── .github/workflows/      # CI, docs and release pipelines
 ├── .github/ship.yml        # gh-ship release orchestration config
 ├── Cargo.toml              # Rust crate configuration
 ├── pyproject.toml           # Python build config (maturin backend)
@@ -56,7 +65,7 @@ oxydemark/
 
 | Component      | Technology                     |
 | -------------- | ------------------------------ |
-| Core language  | Rust (stable, edition 2024)    |
+| Core language  | Rust >= 1.88 (stable, edition 2024) |
 | Python binding | PyO3 0.28 + maturin           |
 | Task runner    | mise                           |
 | Pre-commit     | prek                           |
@@ -74,19 +83,24 @@ mise run test           # cargo nextest run (Rust, pure-Rust, no python feature)
 mise run test:features  # cargo nextest run --features python (Rust + PyO3 layer)
 mise run test:python    # pytest (Python only)
 mise run test:all       # Rust (both configs) and Python test suites
-mise run lint           # cargo clippy -- -D warnings
+mise run typecheck      # ty check (Python public API)
+mise run lint           # cargo clippy --all-targets, in both feature configs
 mise run fmt            # cargo fmt
 mise run fmt:check      # cargo fmt -- --check
-mise run ci             # runs fmt:check + lint + test
+mise run ci             # fmt:check + lint + test + test:features + test:python
+                        #   + typecheck + typos
 mise run changelog      # generate CHANGELOG.md for the next version
 mise run changelog:preview  # preview the next version's release notes
 mise run typos          # spell-check sources, docs and commit messages
 mise run release:preview    # dry-run the release preparation (gh ship preview)
+mise run publish:check  # verify the crate packages cleanly for crates.io
 mise run cover          # Rust coverage (both feature configurations, lcov.info)
 mise run cover:python   # Python coverage (pytest --cov)
 mise run cover:all      # Both coverage reports
 mise run bench          # Python benchmarks comparing Markdown libraries
 mise run docs           # Build the docs site (zensical) + rustdoc into site/
+mise run docs:rust      # rustdoc only (cargo doc --no-deps)
+mise run docs:python    # zensical site only
 mise run docs:serve     # Preview the docs site locally
 mise run setup          # install pre-commit hooks via prek
 ```

@@ -5,7 +5,7 @@ you get started.
 
 ## Prerequisites
 
-- [Rust](https://rustup.rs/) (stable toolchain)
+- [Rust](https://rustup.rs/) >= 1.88 (stable toolchain, edition 2024)
 - [Python](https://www.python.org/) >= 3.12
 - [mise](https://mise.jdx.dev/) -- task runner and tool version manager
 - [maturin](https://www.maturin.rs/) -- build backend for Rust/Python packages
@@ -51,22 +51,27 @@ to see the full list.
 | Task                    | Description                              |
 | ----------------------- | ---------------------------------------- |
 | `mise run build`        | Build the Rust crate                     |
-| `mise run test`         | Run the Rust test suite with nextest     |
+| `mise run test`         | Run the Rust test suite (pure-Rust, no `python` feature) |
+| `mise run test:features` | Run the Rust test suite with the `python` feature |
 | `mise run test:python`  | Run the Python test suite with pytest    |
 | `mise run test:all`     | Run both Rust and Python test suites     |
-| `mise run lint`         | Run clippy lints                         |
+| `mise run typecheck`    | Type-check the Python package with `ty`  |
+| `mise run lint`         | Run clippy lints in both feature configurations |
 | `mise run fmt`          | Format Rust source code                  |
 | `mise run fmt:check`    | Check formatting without modifying files |
 | `mise run typos`        | Spell-check sources, docs and commit messages |
-| `mise run ci`           | Run all CI checks locally                |
+| `mise run ci`           | Run all CI checks locally (`fmt:check`, `lint`, `test`, `test:features`, `test:python`, `typecheck`, `typos`) |
 | `mise run changelog`    | Generate `CHANGELOG.md` for the next version |
 | `mise run changelog:preview` | Preview the next version's release notes |
 | `mise run release:preview` | Dry-run the release preparation       |
+| `mise run publish:check` | Verify the crate packages cleanly for crates.io |
 | `mise run cover`        | Generate the Rust coverage report        |
 | `mise run cover:python` | Generate the Python coverage report      |
 | `mise run cover:all`    | Generate both coverage reports           |
 | `mise run bench`        | Run Python benchmarks                    |
 | `mise run docs`         | Build the docs site and rustdoc reference |
+| `mise run docs:rust`    | Build the rustdoc reference only         |
+| `mise run docs:python`  | Build the Zensical site only             |
 | `mise run docs:serve`   | Preview the docs site locally            |
 | `mise run setup`        | Install pre-commit hooks                 |
 
@@ -121,13 +126,15 @@ rejected, adjust the message to match the convention.
 
 ## Compliance Fixtures
 
-The Comark syntax contract (OMEP-0007) is covered by fixture-driven tests: JSON
-files in [`tests/compliance/`](tests/compliance/) are consumed by both the Rust
-integration test `tests/compliance.rs` and the pytest suite
-`tests/test_compliance.py`.
+The Comark syntax contract (OMEP-0007), and the core Markdown constructs where
+the two render paths must agree, are covered by fixture-driven tests: Markdown
+files in [`tests/compliance/`](tests/compliance/) (with a JSON form still
+supported) are consumed by both the Rust integration test `tests/compliance.rs`
+and the pytest suite `tests/test_compliance.py`. Every case asserts the exact
+HTML of *both* `markdown_to_html` and `render_ast(parse(...))`.
 
-When you change component, slot, prop or nesting behaviour, add a fixture case
-rather than a hand-written test. See
+When you change component, slot, prop or nesting behaviour, or anything either
+renderer emits, add a fixture case rather than a hand-written test. See
 [`tests/compliance/README.md`](tests/compliance/README.md) for the schema and a
 step-by-step guide.
 
