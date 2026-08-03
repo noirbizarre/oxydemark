@@ -1,8 +1,9 @@
-# Comark compliance fixtures
+# Compliance fixtures
 
 Data-driven test cases for the Comark syntax specified in
-[OMEP-0007](../../docs/specs/OMEP-0007-comark-syntax.md). They are the single
-source of truth for the Comark behaviour contract and are consumed by **two**
+[OMEP-0007](../../docs/specs/OMEP-0007-comark-syntax.md), and for the core
+Markdown constructs where the two render paths must not drift. They are the
+single source of truth for the rendering contract and are consumed by **two**
 harnesses running the very same files:
 
 | Harness                    | Runner                                                |
@@ -27,6 +28,7 @@ forms the first half of the test id.
 | `props.md`      | typed block props (frontmatter and `yaml [props]` fences) |
 | `nesting.md`    | multi-colon fences and nested components                  |
 | `core.md`       | core Markdown void elements and raw HTML sanitisation     |
+| `blocks.md`     | code blocks, list ordering/tightness, task items, tables  |
 
 ## Markdown format
 

@@ -9,6 +9,18 @@ use std::fmt::Write;
 
 use crate::ast::AstNode;
 
+/// Structural context threaded down the tree while rendering.
+///
+/// rushdown's renderer derives some markup from a node's ancestry rather than
+/// from the node itself. The equivalent ancestry is carried here so that both
+/// render paths stay byte-identical.
+#[derive(Clone, Copy, Default)]
+struct Ctx {
+    /// Set while rendering the rows and cells of a `table_header`, which makes
+    /// cells render as `<th>` instead of `<td>`.
+    in_table_header: bool,
+}
+
 /// Render an `AstNode` tree to an HTML string.
 ///
 /// This is a standalone Rust renderer that works on the Python-friendly
@@ -16,18 +28,23 @@ use crate::ast::AstNode;
 /// Python plugins have modified the AST.
 pub(crate) fn render_ast_to_html(node: &AstNode) -> String {
     let mut output = String::new();
-    render_node(&mut output, node);
+    render_node(&mut output, node, Ctx::default());
     output
 }
 
-fn render_node(w: &mut String, node: &AstNode) {
+fn render_node(w: &mut String, node: &AstNode, ctx: Ctx) {
+    // Only the table rows of a `table_header` inherit the header context; every
+    // other node starts from a clean slate.
+    let child_ctx = match node.kind.as_str() {
+        "table_header" => Ctx {
+            in_table_header: true,
+        },
+        "table_row" => ctx,
+        _ => Ctx::default(),
+    };
     match node.kind.as_str() {
-        "document" => render_children(w, node),
-        "paragraph" => {
-            w.push_str("<p>");
-            render_children(w, node);
-            w.push_str("</p>\n");
-        }
+        "document" => render_children(w, node, child_ctx),
+        "paragraph" => render_paragraph(w, node, false, None, false),
         "heading" => {
             let level = node
                 .attributes
@@ -35,38 +52,37 @@ fn render_node(w: &mut String, node: &AstNode) {
                 .and_then(|v| v.parse::<u8>().ok())
                 .unwrap_or(1);
             let tag = format!("h{level}");
-            write!(w, "<{tag}").unwrap();
+            let _ = write!(w, "<{tag}");
             render_html_attributes(w, node);
             w.push('>');
-            render_children(w, node);
-            writeln!(w, "</{tag}>").unwrap();
+            render_children(w, node, child_ctx);
+            let _ = writeln!(w, "</{tag}>");
         }
         "blockquote" => {
             w.push_str("<blockquote>\n");
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</blockquote>\n");
         }
-        "list" => {
-            let tag = if node.attributes.get("ordered").is_some_and(|v| v == "true") {
-                "ol"
-            } else {
-                "ul"
-            };
-            writeln!(w, "<{tag}>").unwrap();
-            render_children(w, node);
-            writeln!(w, "</{tag}>").unwrap();
-        }
-        "list_item" => {
-            w.push_str("<li>");
-            render_children(w, node);
-            w.push_str("</li>\n");
-        }
+        "list" => render_list(w, node),
+        // A `list_item` reached outside a `list` has no tightness to inherit.
+        "list_item" => render_list_item(w, node, None),
         "code_block" => {
-            w.push_str("<pre><code>");
+            w.push_str("<pre><code");
+            // rushdown derives the language class from the first word of the
+            // fence info string.
+            if let Some(language) = node
+                .attributes
+                .get("info")
+                .and_then(|info| info.split(' ').next())
+                .filter(|language| !language.is_empty())
+            {
+                let _ = write!(w, " class=\"language-{}\"", html_escape_attr(language));
+            }
+            w.push('>');
             if let Some(ref t) = node.text {
                 w.push_str(&html_escape(t));
             }
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</code></pre>\n");
         }
         "thematic_break" => {
@@ -85,34 +101,34 @@ fn render_node(w: &mut String, node: &AstNode) {
         }
         "emphasis" => {
             w.push_str("<em>");
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</em>");
         }
         "strong" => {
             w.push_str("<strong>");
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</strong>");
         }
         "strikethrough" => {
             w.push_str("<del>");
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</del>");
         }
         "link" => {
             let href = node.attributes.get("href").map_or("", |v| v.as_str());
-            write!(w, "<a href=\"{}\"", html_escape_attr(href)).unwrap();
+            let _ = write!(w, "<a href=\"{}\"", html_escape_attr(href));
             render_html_attributes(w, node);
             w.push('>');
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</a>");
         }
         "image" => {
             let src = node.attributes.get("src").map_or("", |v| v.as_str());
-            write!(w, "<img src=\"{}\"", html_escape_attr(src)).unwrap();
+            let _ = write!(w, "<img src=\"{}\"", html_escape_attr(src));
             // `alt` comes right after `src` (and is always emitted, even when
             // empty) to match rushdown's attribute order byte for byte.
             let alt = collect_text(node);
-            write!(w, " alt=\"{}\"", html_escape_attr(&alt)).unwrap();
+            let _ = write!(w, " alt=\"{}\"", html_escape_attr(&alt));
             render_html_attributes(w, node);
             w.push('>');
         }
@@ -121,7 +137,7 @@ fn render_node(w: &mut String, node: &AstNode) {
             if let Some(ref t) = node.text {
                 w.push_str(&html_escape(t));
             }
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</code>");
         }
         "raw_html" => {
@@ -133,32 +149,37 @@ fn render_node(w: &mut String, node: &AstNode) {
             if let Some(ref t) = node.text {
                 w.push_str(t);
             }
-            render_children(w, node);
+            render_children(w, node, child_ctx);
         }
         "table" => {
             w.push_str("<table>\n");
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</table>\n");
         }
         "table_header" => {
             w.push_str("<thead>\n");
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</thead>\n");
         }
         "table_body" => {
             w.push_str("<tbody>\n");
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</tbody>\n");
         }
         "table_row" => {
             w.push_str("<tr>\n");
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</tr>\n");
         }
         "table_cell" => {
-            w.push_str("<td>");
-            render_children(w, node);
-            w.push_str("</td>");
+            let tag = if ctx.in_table_header { "th" } else { "td" };
+            let _ = write!(w, "<{tag}");
+            if let Some(align) = node.attributes.get("align").filter(|a| !a.is_empty()) {
+                let _ = write!(w, " style=\"text-align: {};\"", html_escape_attr(align));
+            }
+            w.push('>');
+            render_children(w, node, child_ctx);
+            let _ = writeln!(w, "</{tag}>");
         }
         "emoji" => {
             // Render emoji as its Unicode text.
@@ -171,7 +192,7 @@ fn render_node(w: &mut String, node: &AstNode) {
             w.push_str("<div");
             render_html_attributes(w, node);
             w.push_str(">\n");
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</div>\n");
         }
         "slot" => {
@@ -181,8 +202,8 @@ fn render_node(w: &mut String, node: &AstNode) {
                 .get("name")
                 .map(String::as_str)
                 .unwrap_or("");
-            writeln!(w, "<div data-slot=\"{}\">", html_escape_attr(name)).unwrap();
-            render_children(w, node);
+            let _ = writeln!(w, "<div data-slot=\"{}\">", html_escape_attr(name));
+            render_children(w, node, child_ctx);
             w.push_str("</div>\n");
         }
         "inline_component" => {
@@ -190,7 +211,7 @@ fn render_node(w: &mut String, node: &AstNode) {
             w.push_str("<span");
             render_html_attributes(w, node);
             w.push('>');
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</span>");
         }
         "span_attributes" => {
@@ -198,19 +219,97 @@ fn render_node(w: &mut String, node: &AstNode) {
             w.push_str("<span");
             render_html_attributes(w, node);
             w.push('>');
-            render_children(w, node);
+            render_children(w, node, child_ctx);
             w.push_str("</span>");
         }
         _ => {
             // Unknown node types: render children transparently.
-            render_children(w, node);
+            render_children(w, node, child_ctx);
         }
     }
 }
 
-fn render_children(w: &mut String, node: &AstNode) {
+/// Render a `list` node as `<ul>`/`<ol>`, propagating tightness to its items.
+fn render_list(w: &mut String, node: &AstNode) {
+    let ordered = node.attributes.get("ordered").is_some_and(|v| v == "true");
+    let tag = if ordered { "ol" } else { "ul" };
+    // A list with no explicit `tight` attribute (e.g. one built by a plugin) is
+    // treated as tight, which is the common Markdown case.
+    let tight = node.attributes.get("tight").is_none_or(|v| v == "true");
+    let _ = write!(w, "<{tag}");
+    if ordered && let Some(start) = node.attributes.get("start").filter(|s| *s != "1") {
+        let _ = write!(w, " start=\"{}\"", html_escape_attr(start));
+    }
+    w.push_str(">\n");
     for child in &node.children {
-        render_node(w, child);
+        if child.kind == "list_item" {
+            render_list_item(w, child, Some(tight));
+        } else {
+            render_node(w, child, Ctx::default());
+        }
+    }
+    let _ = writeln!(w, "</{tag}>");
+}
+
+/// Render a `list_item`, unwrapping paragraphs when the parent list is tight.
+///
+/// `list_tight` is `None` when the item has no `list` parent, which suppresses
+/// the newline rushdown only emits for items inside a list.
+fn render_list_item(w: &mut String, node: &AstNode, list_tight: Option<bool>) {
+    w.push_str("<li>");
+    let tight = list_tight == Some(true);
+    if list_tight.is_some()
+        && let Some(first) = node.children.first()
+        && (!tight || first.kind != "paragraph")
+    {
+        w.push('\n');
+    }
+    // The task checkbox is emitted by the item's first paragraph, as rushdown
+    // does, so that it lands inside the `<p>` of a loose list.
+    let mut task = node.attributes.get("task").map(String::as_str);
+    for (index, child) in node.children.iter().enumerate() {
+        if child.kind == "paragraph" {
+            let has_next = index + 1 < node.children.len();
+            render_paragraph(w, child, tight, task.take(), has_next);
+        } else {
+            render_node(w, child, Ctx::default());
+        }
+    }
+    w.push_str("</li>\n");
+}
+
+/// Render a `paragraph`, optionally without its `<p>` wrapper.
+///
+/// Paragraphs directly inside a tight list item render bare, followed by a
+/// newline when another sibling follows (e.g. a nested list).
+fn render_paragraph(
+    w: &mut String,
+    node: &AstNode,
+    bare: bool,
+    task: Option<&str>,
+    has_next: bool,
+) {
+    if !bare {
+        w.push_str("<p>");
+    }
+    if let Some(task) = task {
+        w.push_str(if task == "completed" {
+            r#"<input checked="" disabled="" type="checkbox"> "#
+        } else {
+            r#"<input disabled="" type="checkbox"> "#
+        });
+    }
+    render_children(w, node, Ctx::default());
+    if !bare {
+        w.push_str("</p>\n");
+    } else if has_next && !node.children.is_empty() {
+        w.push('\n');
+    }
+}
+
+fn render_children(w: &mut String, node: &AstNode, ctx: Ctx) {
+    for child in &node.children {
+        render_node(w, child, ctx);
     }
 }
 
@@ -226,13 +325,12 @@ fn render_html_attributes(w: &mut String, node: &AstNode) {
         .collect();
     keys.sort_unstable();
     for key in keys {
-        write!(
+        let _ = write!(
             w,
             " {}=\"{}\"",
             key,
             html_escape_attr(&node.attributes[key])
-        )
-        .unwrap();
+        );
     }
 }
 

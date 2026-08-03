@@ -11,7 +11,7 @@ use pyo3::prelude::*;
 #[cfg(feature = "python")]
 use pyo3::types::{PyDict, PyList};
 use rushdown::as_kind_data;
-use rushdown::ast::{self, KindData, NodeRef, TextQualifier};
+use rushdown::ast::{self, KindData, NodeRef, TableCellAlignment, Task, TextQualifier};
 use rushdown_emoji::Emoji;
 
 use crate::extensions::{BlockComponent, InlineComponent, Slot, SpanAttributes};
@@ -681,6 +681,9 @@ const RAW_HTML_PLACEHOLDER: &str = "<!-- raw HTML omitted -->";
 /// source markup (the block form keeps rushdown's trailing newline).
 /// `Emoji` extension nodes produce their Unicode character.
 ///
+/// `CodeBlock` content is stored as source line segments and is joined here so
+/// that plugins can read (and rewrite) fenced or indented code.
+///
 /// `CodeSpan` carries its content inline (rushdown 0.18 dropped the child
 /// `Text` node), so its value is surfaced here to keep the exposed tree -- and
 /// therefore [`crate::api::render_ast`] -- unchanged for plugin authors.
@@ -688,6 +691,7 @@ fn node_text(node: &ast::Node, source: &str) -> Option<String> {
     match node.kind_data() {
         KindData::Text(t) => Some(t.str(source).to_string()),
         KindData::CodeSpan(c) => Some(c.str(source).to_string()),
+        KindData::CodeBlock(c) => Some(c.value().iter(source).collect::<String>()),
         KindData::RawHtml(_) => Some(RAW_HTML_PLACEHOLDER.to_string()),
         KindData::HtmlBlock(_) => Some(format!("{RAW_HTML_PLACEHOLDER}\n")),
         KindData::Extension(ext) => (ext.as_ref() as &dyn std::any::Any)
@@ -717,6 +721,18 @@ fn is_hardbreak(node: &ast::Node) -> bool {
 
 /// Extract attributes (e.g. href, src, title) from link/image nodes.
 ///
+/// Structural information that HTML rendering depends on is surfaced here too,
+/// so that [`crate::api::render_ast`] can reproduce the fast path byte for
+/// byte:
+///
+/// * `list` carries `ordered`, `tight` and (when ordered) `start`;
+/// * `list_item` carries `task` (`active` or `completed`) for task list items;
+/// * `code_block` carries `info` (the full fence info string);
+/// * `table_cell` carries `align` when the column is aligned.
+///
+/// None of these keys are in the HTML attribute allow-list, so they stay in the
+/// AST for plugins without leaking into the rendered markup.
+///
 /// For component extension nodes, extract the component name as "name".
 /// For emoji nodes, extract the shortcode as "shortcode".
 fn node_attributes(node: &ast::Node, source: &str) -> HashMap<String, String> {
@@ -740,6 +756,35 @@ fn node_attributes(node: &ast::Node, source: &str) -> HashMap<String, String> {
         }
         KindData::Heading(h) => {
             attrs.insert("level".to_string(), h.level().to_string());
+        }
+        KindData::List(list) => {
+            attrs.insert("ordered".to_string(), list.is_ordered().to_string());
+            attrs.insert("tight".to_string(), list.is_tight().to_string());
+            if list.is_ordered() {
+                attrs.insert("start".to_string(), list.start().to_string());
+            }
+        }
+        KindData::ListItem(item) => {
+            if let Some(task) = item.task() {
+                let state = match task {
+                    Task::Completed => "completed",
+                    // `Task` is `#[non_exhaustive]`; unknown states are treated
+                    // as unchecked, matching rushdown's `Task::Active`.
+                    _ => "active",
+                };
+                attrs.insert("task".to_string(), state.to_string());
+            }
+        }
+        KindData::CodeBlock(code) => {
+            if let Some(info) = code.info().filter(|i| !i.str(source).is_empty()) {
+                attrs.insert("info".to_string(), info.str(source).to_string());
+            }
+        }
+        KindData::TableCell(cell) => {
+            let alignment = cell.alignment();
+            if alignment != TableCellAlignment::None {
+                attrs.insert("align".to_string(), alignment.as_str().to_string());
+            }
         }
         KindData::Extension(ext) => {
             if let Some(emoji) = (ext.as_ref() as &dyn std::any::Any).downcast_ref::<Emoji>() {
