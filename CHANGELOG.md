@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1](https://github.com/noirbizarre/oxydemark/compare/0.2.0..0.2.1) - 2026-08-03
+
+### 🐛 Bug Fixes
+
+- **deps** Upgrade to rushdown 0.18 and pin the companion crates - ([623e49a](https://github.com/noirbizarre/oxydemark/commit/623e49ab37388a97eeef441a3c403265e1f1d358))
+- **render** Align both render paths on void elements and raw HTML - ([811e571](https://github.com/noirbizarre/oxydemark/commit/811e571813e80dd541a2cf2976f1ad5ab21965ac))
+
+### 📚 Documentation
+
+- Record the rushdown 0.18 pinning policy - ([e99587b](https://github.com/noirbizarre/oxydemark/commit/e99587bd4f3d490e93985b543b6d6c0efd59c480))
+- Record the coverage setup in OMEP-0012 - ([f14da26](https://github.com/noirbizarre/oxydemark/commit/f14da26deac77f11c69514a0de29062298b7619d))
+
+### 🔧 CI
+
+- Guard against rushdown companion-crate drift - ([c72b38f](https://github.com/noirbizarre/oxydemark/commit/c72b38f90a45b675962b93abf2f82215045d4336))
+- Report rust and python coverage to codecov - ([16f50cb](https://github.com/noirbizarre/oxydemark/commit/16f50cbfbce9170a80be1d7e544d52609ee37935))
+
 ## 0.2.0 - 2026-08-03
 
 ### 💫 Features
@@ -75,4 +92,4 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## ❤️ New Contributors
 
-* @noirbizarre made their first contribution
+* @noirbizarre made their first contribution in [#31](https://github.com/noirbizarre/oxydemark/pull/31)
