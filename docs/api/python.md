@@ -10,6 +10,12 @@ an implementation detail and must not be imported directly.
 
 ::: oxydemark.Plugin
 
+::: oxydemark.api.Preprocessor
+
+::: oxydemark.api.Transformer
+
+::: oxydemark.api.Postprocessor
+
 ## Parsing and rendering
 
 ::: oxydemark.parse
@@ -51,3 +57,12 @@ an implementation detail and must not be imported directly.
         - MentionPlugin
         - LazyImagesPlugin
         - Shortcode
+
+### Defaults
+
+The `kinds=` and `shortcodes=` arguments **replace** these defaults rather than
+extending them; spread the mapping to add entries.
+
+::: oxydemark.contrib.admonitions.DEFAULT_KINDS
+
+::: oxydemark.contrib.shortcodes.DEFAULT_SHORTCODES

@@ -13,7 +13,8 @@ Output:
 
 ```html
 <div class="admonition admonition-note">
-<div class="admonition-title">Note</div>
+<div class="admonition-title">
+Note</div>
 <p>Useful information.</p>
 </div>
 ```

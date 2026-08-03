@@ -122,6 +122,12 @@ attributes["class"] = "highlight"
 node.attributes = attributes
 ```
 
+`props` is the one exception: it is a **read-only** computed getter exposing a
+block component's typed YAML props (OMEP-0007) as a native `dict`, where values
+keep their YAML types (`str`, `int`, `float`, `bool`, `list`, `dict`, `None`).
+It has no setter; to override a prop, write the equivalent entry into
+`attributes` instead, which takes precedence.
+
 `walk()` is therefore an **inspection-only** API. Use explicit recursion for
 mutation.
 
@@ -143,16 +149,43 @@ gracefully.
 
 Block: `document`, `paragraph`, `heading`, `blockquote`, `list`, `list_item`,
 `code_block`, `html_block`, `thematic_break`, `table`, `table_header`,
-`table_body`, `table_row`, `table_cell`, `block_component`.
+`table_body`, `table_row`, `table_cell`, `link_reference_definition`,
+`block_component`, `slot`.
 
 Inline: `text`, `emphasis`, `strong`, `strikethrough`, `code_span`, `link`,
 `image`, `raw_html`, `softbreak`, `hardbreak`, `emoji`, `inline_component`,
-`span_attributes`, `slot`.
+`span_attributes`.
 
-Attributes on a node are rendered as HTML attributes for the kinds that support
-them (`link`, `image`, `heading`, `block_component`, ...). Notably,
-`block_component` renders as a `<div>` carrying every attribute except `name`,
-which makes it a convenient generic container.
+A node the converter cannot classify gets the kind `unknown`; the renderer
+renders its children transparently, as it does for any kind it does not know.
+
+Some kinds carry structural attributes that the renderer needs and that are
+*not* emitted as HTML: `list` has `ordered`, `tight` and `start`, `list_item`
+has `task`, `code_block` has `info` (the full fence info string) and
+`table_cell` has `align`. Read and rewrite them like any other attribute.
+
+### Attributes and HTML output
+
+An attribute in the AST does **not** automatically reach the HTML. Only
+HTML-valid presentational keys are emitted:
+
+`class`, `id`, `style`, `title`, `role`, `lang`, `dir`, and any `data-*` or
+`aria-*` key.
+
+Everything else stays in the AST for plugins to read but is dropped from the
+output -- including the synthetic `name` on components and slots, the `:`-prefixed
+typed props of OMEP-0007, and the structural keys listed above. So
+`block_component` renders as a `<div>` carrying only that allow-listed subset:
+
+```python
+AstNode("block_component", attributes={"name": "card", "class": "c", "href": "/x"})
+# renders as: <div class="c">
+#             </div>
+```
+
+To carry arbitrary data through to the markup, use a `data-*` key. `link`,
+`image` and `heading` additionally emit their own `href` / `src` / `title`
+attributes, which are handled by the renderer rather than by the allow-list.
 
 ## Example plugins
 
@@ -182,7 +215,14 @@ it looks like a link reference. Detection is therefore done on text
 (`preprocess` rewrites the blockquote into a Comark `:::note` fence), while
 classes and the title node are added on the AST (`transform`).
 
-Configure the recognised markers with `AdmonitionPlugin(kinds={"danger": "Danger!"})`.
+`AdmonitionPlugin(kinds=...)` **replaces** the recognised markers rather than
+adding to them. To extend the defaults, spread them:
+
+```python
+from oxydemark.contrib.admonitions import DEFAULT_KINDS
+
+AdmonitionPlugin(kinds={**DEFAULT_KINDS, "danger": "Danger!"})
+```
 
 ### `ShortcodePlugin` -- `transform`
 
@@ -193,10 +233,13 @@ Watch {{ youtube dQw4w9WgXcQ }} now.
 ```
 
 Unknown shortcodes, and handlers returning an empty string, leave the marker
-untouched. Add your own:
+untouched. `shortcodes=` **replaces** the built-in set, so spread the defaults
+to add your own:
 
 ```python
-ShortcodePlugin(shortcodes={"hi": lambda arg: f"<b>{arg}</b>"})
+from oxydemark.contrib.shortcodes import DEFAULT_SHORTCODES
+
+ShortcodePlugin(shortcodes={**DEFAULT_SHORTCODES, "hi": lambda arg: f"<b>{arg}</b>"})
 ```
 
 ### `MentionPlugin` -- `transform`

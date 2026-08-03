@@ -37,14 +37,22 @@ Everything re-exported from the crate root is public and frozen under
 
 ```toml
 [dependencies]
-oxydemark = "0.1"
+oxydemark = "0.2"
 ```
 
-```rust
-use oxydemark::{markdown_to_html, parse};
+The crate's minimum supported Rust version is **1.88** (edition 2024).
 
-let html = markdown_to_html("# Hello")?;
-let root = parse("# Hello")?;
+```rust
+use oxydemark::{OxydeError, markdown_to_html, parse};
+
+fn main() -> Result<(), OxydeError> {
+    // Parsing is infallible; only rendering can fail.
+    let root = parse("# Hello");
+    let html = markdown_to_html("# Hello")?;
+    println!("{}", html);
+    let _ = root;
+    Ok(())
+}
 ```
 
 ## Feature flags
