@@ -45,9 +45,12 @@ class Plugin(Protocol):
     ## Escaping rules worth knowing
 
     - [`AstNode.text`][oxydemark.AstNode] is **HTML-escaped** by the renderer.
-    - Raw HTML present in the *source* Markdown is **stripped**.
-    - A node of kind `"raw_html"` emits its `text` **verbatim**; it is the only
-      supported way to inject markup from a `transform` hook.
+    - Raw HTML present in the *source* Markdown is **stripped**: the parser
+      replaces it with a `<!-- raw HTML omitted -->` placeholder, which is what
+      the resulting `"raw_html"` / `"html_block"` nodes carry as their `text`.
+    - A node of kind `"raw_html"` *created by a plugin* emits its `text`
+      **verbatim**; it is the only supported way to inject markup from a
+      `transform` hook.
     """
 
     def preprocess(self, markdown: str) -> str:

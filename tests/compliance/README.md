@@ -24,6 +24,7 @@ One JSON file per topic, named `<topic>.json`:
 | `slots.json`      | named slots, explicit and implicit default slots             |
 | `props.json`      | typed block props (frontmatter and `yaml [props]` fences)    |
 | `nesting.json`    | multi-colon fences and nested components                     |
+| `core.json`       | core Markdown void elements and raw HTML sanitisation        |
 
 ## Schema
 
@@ -98,6 +99,12 @@ the child *set* is itself the contract (slot ordering, nesting depth).
   `" here."`), so avoid `text` assertions on inline leaves.
 - Multi-line `markdown` and fenced props are written as `\n`-joined JSON
   strings; quotes and backslashes must be escaped.
+- A `---` line at the very *start* of a document is claimed by the frontmatter
+  parser and can never be a thematic break. Use `***`, or put content before
+  the `---`.
+- Raw HTML in the source is replaced by a `<!-- raw HTML omitted -->`
+  placeholder, both in the HTML and in the `text` of the resulting `raw_html` /
+  `html_block` nodes.
 - The fixtures are deliberately excluded from the published crate tarball and
   the PyPI sdist (see the `include` allow-list in `Cargo.toml`); the Rust
   harness skips itself when the directory is absent.

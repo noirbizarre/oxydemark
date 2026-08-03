@@ -668,17 +668,28 @@ fn kind_name(node: &ast::Node) -> &'static str {
     }
 }
 
+/// Placeholder substituted for raw HTML coming from the Markdown source.
+///
+/// rushdown renders with `allows_unsafe: false` and replaces raw HTML with this
+/// comment. Applying the same substitution when the arena is converted to the
+/// `AstNode` tree keeps both render paths byte-identical and prevents unsanitised
+/// source markup from reaching the standalone renderer. A `raw_html` node
+/// *created by a plugin* is unaffected and still renders its own `text` verbatim.
+const RAW_HTML_PLACEHOLDER: &str = "<!-- raw HTML omitted -->";
+
 /// Extract text content from a node, if it is a text-bearing leaf node.
 ///
 /// In rushdown, `Text` holds its content directly via `str(source)`.
 /// `CodeSpan` content is stored in child `Text` nodes, so we return `None`
 /// here and let child traversal handle it.
-/// `RawHtml` uses `str(source)` which returns a `Cow<str>`.
+/// `RawHtml` and `HtmlBlock` yield [`RAW_HTML_PLACEHOLDER`] rather than the
+/// source markup (the block form keeps rushdown's trailing newline).
 /// `Emoji` extension nodes produce their Unicode character.
 fn node_text(node: &ast::Node, source: &str) -> Option<String> {
     match node.kind_data() {
         KindData::Text(t) => Some(t.str(source).to_string()),
-        KindData::RawHtml(h) => Some(h.str(source).to_string()),
+        KindData::RawHtml(_) => Some(RAW_HTML_PLACEHOLDER.to_string()),
+        KindData::HtmlBlock(_) => Some(format!("{RAW_HTML_PLACEHOLDER}\n")),
         KindData::Extension(ext) => (ext.as_ref() as &dyn std::any::Any)
             .downcast_ref::<Emoji>()
             .map(|emoji| emoji.as_str().to_string()),

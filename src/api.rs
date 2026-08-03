@@ -488,9 +488,23 @@ mod tests {
 
     #[test]
     fn render_image() {
-        let html = markdown_to_html("![alt](img.png)").unwrap();
-        assert!(html.contains("<img"));
-        assert!(html.contains("img.png"));
+        assert_both_paths(
+            "![alt](img.png)",
+            "<p><img src=\"img.png\" alt=\"alt\"></p>\n",
+        );
+    }
+
+    #[test]
+    fn render_image_without_alt_text() {
+        assert_both_paths("![](img.png)", "<p><img src=\"img.png\" alt=\"\"></p>\n");
+    }
+
+    #[test]
+    fn render_image_with_title() {
+        assert_both_paths(
+            "![alt](img.png \"Title\")",
+            "<p><img src=\"img.png\" alt=\"alt\" title=\"Title\"></p>\n",
+        );
     }
 
     #[test]
@@ -513,8 +527,39 @@ mod tests {
 
     #[test]
     fn render_thematic_break() {
-        let html = markdown_to_html("***").unwrap();
-        assert!(html.contains("<hr"));
+        assert_both_paths("***", "<hr>\n");
+    }
+
+    #[test]
+    fn render_thematic_break_after_content() {
+        // `---` is only a rule once something precedes it: a leading `---`
+        // opens a frontmatter block (see `render_leading_dashes_are_frontmatter`).
+        assert_both_paths("a\n\n---\n\nb", "<p>a</p>\n<hr>\n<p>b</p>\n");
+    }
+
+    #[test]
+    fn render_hard_break() {
+        assert_both_paths("a  \nb", "<p>a<br>\nb</p>\n");
+    }
+
+    #[test]
+    fn render_html_block_is_omitted() {
+        assert_both_paths("<div>x</div>", "<!-- raw HTML omitted -->\n");
+    }
+
+    #[test]
+    fn render_inline_raw_html_is_omitted() {
+        assert_both_paths(
+            "x <b>y</b> z",
+            "<p>x <!-- raw HTML omitted -->y<!-- raw HTML omitted --> z</p>\n",
+        );
+    }
+
+    #[test]
+    fn render_leading_dashes_are_frontmatter() {
+        // A `---` line at the very start of a document is claimed by the
+        // frontmatter parser, never by the thematic break rule.
+        assert_both_paths("---", "<!-- raw HTML omitted -->\n");
     }
 
     #[test]
@@ -552,13 +597,8 @@ mod tests {
         assert!(html.contains("click"));
     }
 
-    #[test]
-    fn render_ast_image_round_trip() {
-        let ast = parse("![photo](pic.jpg)");
-        let html = render_ast_to_html(&ast);
-        assert!(html.contains("<img"));
-        assert!(html.contains("src=\"pic.jpg\""));
-    }
+    // `render_image*` and `render_thematic_break*` above already assert both
+    // paths byte for byte, so no separate round-trip test is needed here.
 
     #[test]
     fn render_ast_code_block_round_trip() {
@@ -579,13 +619,6 @@ mod tests {
         let ast = parse("- x\n- y");
         let html = render_ast_to_html(&ast);
         assert!(html.contains("<li>"));
-    }
-
-    #[test]
-    fn render_ast_thematic_break_round_trip() {
-        let ast = parse("***");
-        let html = render_ast_to_html(&ast);
-        assert!(html.contains("<hr"));
     }
 
     #[test]

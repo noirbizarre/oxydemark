@@ -70,7 +70,7 @@ fn render_node(w: &mut String, node: &AstNode) {
             w.push_str("</code></pre>\n");
         }
         "thematic_break" => {
-            w.push_str("<hr />\n");
+            w.push_str("<hr>\n");
         }
         "text" => {
             if let Some(ref t) = node.text {
@@ -81,7 +81,7 @@ fn render_node(w: &mut String, node: &AstNode) {
             w.push('\n');
         }
         "hardbreak" => {
-            w.push_str("<br />\n");
+            w.push_str("<br>\n");
         }
         "emphasis" => {
             w.push_str("<em>");
@@ -109,12 +109,12 @@ fn render_node(w: &mut String, node: &AstNode) {
         "image" => {
             let src = node.attributes.get("src").map_or("", |v| v.as_str());
             write!(w, "<img src=\"{}\"", html_escape_attr(src)).unwrap();
-            render_html_attributes(w, node);
+            // `alt` comes right after `src` (and is always emitted, even when
+            // empty) to match rushdown's attribute order byte for byte.
             let alt = collect_text(node);
-            if !alt.is_empty() {
-                write!(w, " alt=\"{}\"", html_escape_attr(&alt)).unwrap();
-            }
-            w.push_str(" />");
+            write!(w, " alt=\"{}\"", html_escape_attr(&alt)).unwrap();
+            render_html_attributes(w, node);
+            w.push('>');
         }
         "code_span" => {
             w.push_str("<code>");

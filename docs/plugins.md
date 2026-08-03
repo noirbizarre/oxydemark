@@ -77,9 +77,12 @@ Three rules govern what actually reaches the output:
    `node.text = "<b>x</b>"` renders as `&lt;b&gt;x&lt;/b&gt;`.
 2. Raw HTML present in the **source** Markdown is **stripped**
    (`<!-- raw HTML omitted -->`). A `preprocess` hook cannot smuggle markup in.
-3. A node of kind `raw_html` emits its `text` **verbatim**. This is the only
-   supported injection point, and it is your responsibility to escape any
-   untrusted data placed in it.
+   The substitution happens when the AST is built, so the `raw_html` and
+   `html_block` nodes a `transform` hook sees already carry the placeholder as
+   their `text`, and both render paths agree byte for byte.
+3. A node of kind `raw_html` **created by a plugin** emits its `text`
+   **verbatim**. This is the only supported injection point, and it is your
+   responsibility to escape any untrusted data placed in it.
 
 Whenever the markup you want already has an AST representation (`link`,
 `image`, `strong`, `block_component`, ...), build those nodes instead of

@@ -1,0 +1,82 @@
+{
+  "description": "Core Markdown constructs where the two render paths historically disagreed: HTML5 void elements and raw HTML sanitisation",
+  "cases": [
+    {
+      "name": "image",
+      "description": "Images are void elements in HTML5 style, with alt right after src",
+      "markdown": "![alt](pic.png)",
+      "html": "<p><img src=\"pic.png\" alt=\"alt\"></p>\n",
+      "ast": {
+        "descend": "first:image",
+        "attributes": { "src": "pic.png" }
+      }
+    },
+    {
+      "name": "image-empty-alt",
+      "description": "An empty alt text is still emitted, as alt is required markup",
+      "markdown": "![](pic.png)",
+      "html": "<p><img src=\"pic.png\" alt=\"\"></p>\n",
+      "ast": {
+        "descend": "first:image",
+        "attributes": { "src": "pic.png" }
+      }
+    },
+    {
+      "name": "image-title",
+      "description": "A link title becomes a title attribute, after alt",
+      "markdown": "![alt](pic.png \"Title\")",
+      "html": "<p><img src=\"pic.png\" alt=\"alt\" title=\"Title\"></p>\n",
+      "ast": {
+        "descend": "first:image",
+        "attributes": { "src": "pic.png", "title": "Title" }
+      }
+    },
+    {
+      "name": "thematic-break",
+      "description": "Thematic breaks render as an HTML5 void <hr>",
+      "markdown": "***",
+      "html": "<hr>\n",
+      "ast": {
+        "descend": "first:thematic_break"
+      }
+    },
+    {
+      "name": "thematic-break-dashes",
+      "description": "A --- rule is only a thematic break once content precedes it; a leading --- opens a frontmatter block",
+      "markdown": "a\n\n---\n\nb",
+      "html": "<p>a</p>\n<hr>\n<p>b</p>\n",
+      "ast": {
+        "descend": "first:thematic_break"
+      }
+    },
+    {
+      "name": "hard-break",
+      "description": "Two trailing spaces produce an HTML5 void <br>",
+      "markdown": "a  \nb",
+      "html": "<p>a<br>\nb</p>\n",
+      "ast": {
+        "descend": "first:hardbreak"
+      }
+    },
+    {
+      "name": "html-block-omitted",
+      "description": "Raw HTML blocks from the source are replaced by a placeholder comment; the AST carries the placeholder, not the source markup",
+      "markdown": "<div>x</div>",
+      "html": "<!-- raw HTML omitted -->\n",
+      "ast": {
+        "descend": "first:html_block",
+        "text": "<!-- raw HTML omitted -->\n"
+      }
+    },
+    {
+      "name": "inline-html-omitted",
+      "description": "Inline raw HTML is replaced by the same placeholder, without a trailing newline",
+      "markdown": "x <b>y</b> z",
+      "html": "<p>x <!-- raw HTML omitted -->y<!-- raw HTML omitted --> z</p>\n",
+      "ast": {
+        "descend": "first:raw_html",
+        "text": "<!-- raw HTML omitted -->"
+      }
+    }
+  ]
+}

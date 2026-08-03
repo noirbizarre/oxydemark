@@ -319,8 +319,7 @@ class TestMarkdownToHtml:
 
     def test_image(self):
         html = oxydemark.markdown_to_html("![alt](pic.png)")
-        assert "<img" in html
-        assert "pic.png" in html
+        assert html == '<p><img src="pic.png" alt="alt"></p>\n'
 
     def test_code_block(self):
         html = oxydemark.markdown_to_html("```\ncode\n```")
@@ -340,7 +339,7 @@ class TestMarkdownToHtml:
 
     def test_thematic_break(self):
         html = oxydemark.markdown_to_html("***")
-        assert "<hr" in html
+        assert html == "<hr>\n"
 
     def test_strikethrough(self):
         html = oxydemark.markdown_to_html("~~deleted~~")
