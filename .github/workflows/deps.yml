@@ -1,0 +1,43 @@
+name: Dependencies
+
+# `rushdown-meta` and `rushdown-emoji` bump their own `rushdown` requirement
+# across *patch* releases, so a caret requirement on them silently pulls a
+# second, incompatible `rushdown` into any downstream graph (issue #33). They
+# are therefore pinned exactly in `Cargo.toml`, which means `cargo update`
+# alone can no longer surface upstream movement.
+#
+# This job deliberately breaks those pins on a schedule. A red run means a new
+# `rushdown` line is out and an upgrade pull request is due; it is not attached
+# to pull requests, so upstream releases never break contributor CI.
+on:
+  schedule:
+    # Mondays, 05:00 UTC.
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  upstream:
+    name: Build against the latest dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `cargo update --breaking` is still unstable, hence nightly.
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: taiki-e/install-action@nextest
+
+      - name: Bump every requirement to its latest major
+        run: cargo +nightly -Z unstable-options update --breaking
+
+      - name: Show the resolved graph
+        run: cargo tree --invert rushdown --depth 1
+
+      - name: Build
+        run: cargo build
+
+      - name: Test
+        run: cargo nextest run

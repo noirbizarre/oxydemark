@@ -130,6 +130,20 @@ jobs:
       - name: Dry-run publish
         run: cargo publish --dry-run --locked
 
+      # `Cargo.lock` is not honoured by library consumers: they resolve our
+      # requirements from scratch. `rushdown-meta`/`rushdown-emoji` bump their
+      # own `rushdown` requirement across patch releases, so a caret here pulls
+      # a second, incompatible `rushdown` into the graph and the build explodes
+      # downstream while CI stays green (issue #33). Reproduce that resolution.
+      # Runs last: it rewrites `Cargo.lock`, which the `--locked` step above
+      # needs intact.
+      - name: Build with a freshly resolved dependency graph
+        run: |
+          cargo update
+          cargo build
+          git diff --exit-code Cargo.lock \
+            || echo "::notice::Cargo.lock is not at the latest resolvable versions"
+
   python:
     name: Python wheel (${{ matrix.python-version }})
     runs-on: ubuntu-latest
