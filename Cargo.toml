@@ -1,6 +1,6 @@
 [package]
 name = "oxydemark"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Axel H. <noirbizarre@users.noreply.github.com>"]
 edition = "2024"
 # Effective floor: `src/extensions.rs` uses let-chains, stabilised in 1.88

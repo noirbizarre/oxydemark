@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2](https://github.com/noirbizarre/oxydemark/compare/0.2.1..0.2.2) - 2026-08-03
+
+### 🐛 Bug Fixes
+
+- **api** Re-export `Meta` from the crate root - ([fd87a69](https://github.com/noirbizarre/oxydemark/commit/fd87a691d5158265de2cfeed28ad33d4a33c0acf))
+- **comark** Close a component whose body is only a props block - ([7ff1faf](https://github.com/noirbizarre/oxydemark/commit/7ff1faf0a60c60d479c9d7328da5d9662c5f1e04))
+
+### 🧪 Tests
+
+- **compliance** Add a delimited-markdown fixture format - ([05d363b](https://github.com/noirbizarre/oxydemark/commit/05d363b98e3a89e0cfea7d1f04904e375b9608f4))
+
 ## [0.2.1](https://github.com/noirbizarre/oxydemark/compare/0.2.0..0.2.1) - 2026-08-03
 
 ### 🐛 Bug Fixes
