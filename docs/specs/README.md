@@ -122,3 +122,4 @@ Links, references, follow-up actions.
 | [0009](OMEP-0009-publishing.md) | Publishing & Distribution (crates.io + PyPI) | proposed |
 | [0010](OMEP-0010-metadata-extraction.md) | Structured metadata extraction (TOC / anchors / summary) | proposed |
 | [0011](OMEP-0011-documentation.md) | Documentation Site & API Reference | accepted |
+| [0012](OMEP-0012-code-coverage.md) | Code Coverage Reporting | accepted |

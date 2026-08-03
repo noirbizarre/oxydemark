@@ -39,6 +39,7 @@ nav = [
     "specs/OMEP-0009-publishing.md",
     "specs/OMEP-0010-metadata-extraction.md",
     "specs/OMEP-0011-documentation.md",
+    "specs/OMEP-0012-code-coverage.md",
   ] },
 ]
 

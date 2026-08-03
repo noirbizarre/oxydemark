@@ -82,7 +82,9 @@ mise run changelog      # generate CHANGELOG.md for the next version
 mise run changelog:preview  # preview the next version's release notes
 mise run typos          # spell-check sources, docs and commit messages
 mise run release:preview    # dry-run the release preparation (gh ship preview)
-mise run cover          # cargo llvm-cov
+mise run cover          # Rust coverage (both feature configurations, lcov.info)
+mise run cover:python   # Python coverage (pytest --cov)
+mise run cover:all      # Both coverage reports
 mise run bench          # Python benchmarks comparing Markdown libraries
 mise run docs           # Build the docs site (zensical) + rustdoc into site/
 mise run docs:serve     # Preview the docs site locally

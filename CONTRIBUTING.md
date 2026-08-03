@@ -62,7 +62,9 @@ to see the full list.
 | `mise run changelog`    | Generate `CHANGELOG.md` for the next version |
 | `mise run changelog:preview` | Preview the next version's release notes |
 | `mise run release:preview` | Dry-run the release preparation       |
-| `mise run cover`        | Generate code coverage report            |
+| `mise run cover`        | Generate the Rust coverage report        |
+| `mise run cover:python` | Generate the Python coverage report      |
+| `mise run cover:all`    | Generate both coverage reports           |
 | `mise run bench`        | Run Python benchmarks                    |
 | `mise run docs`         | Build the docs site and rustdoc reference |
 | `mise run docs:serve`   | Preview the docs site locally            |

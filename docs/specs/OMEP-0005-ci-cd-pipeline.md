@@ -92,10 +92,14 @@ has excellent community-maintained actions (`dtolnay/rust-toolchain`,
 | Job | Description | Toolchain |
 | --- | ----------- | --------- |
 | `check` | `cargo fmt --check` + `cargo clippy` | stable |
-| `test` | `cargo nextest run` | stable, nightly (matrix) |
+| `test` | `cargo llvm-cov nextest`, both feature configurations | stable, nightly (matrix) |
 | `build` | `cargo build` | stable |
 | `python` | Build wheel with maturin, smoke test import | stable + Python 3.12 |
 | `changelog` | `git cliff --unreleased` validation | N/A |
+
+**Coverage:** the `test` and `python` jobs also produce coverage and JUnit
+reports and upload them to Codecov, each behind its own flag and gated to a
+single matrix leg. See OMEP-0012 for the rationale and the component layout.
 
 **Key actions used:**
 
@@ -104,8 +108,9 @@ has excellent community-maintained actions (`dtolnay/rust-toolchain`,
 | `actions/checkout@v4` | Clone the repository |
 | `dtolnay/rust-toolchain` | Install Rust toolchain |
 | `Swatinem/rust-cache@v2` | Cache cargo registry and target dir |
-| `taiki-e/install-action` | Install cargo-nextest, git-cliff |
+| `taiki-e/install-action` | Install cargo-nextest, cargo-llvm-cov, git-cliff |
 | `actions/setup-python@v5` | Install Python for wheel build |
+| `codecov/codecov-action@v7` | Upload coverage and test results (OMEP-0012) |
 
 **Triggers:** `push` to `main`, `pull_request` targeting `main`.
 

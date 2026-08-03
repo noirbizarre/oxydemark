@@ -100,7 +100,9 @@ version managers (rustup overrides, pyenv, asdf).
 | `ci`               | depends on fmt:check, lint, test |
 | `changelog`        | `git cliff --output CHANGELOG.md`|
 | `changelog:preview`| `git cliff --unreleased`         |
-| `cover`            | `cargo llvm-cov`                 |
+| `cover`            | Rust coverage, both feature configurations (OMEP-0012) |
+| `cover:python`     | `pytest --cov` (OMEP-0012)       |
+| `cover:all`        | depends on cover, cover:python   |
 | `bench`            | `uv run --group bench pytest benchmarks/ --benchmark-only` |
 | `setup`            | `prek install`                   |
 
