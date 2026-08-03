@@ -70,6 +70,23 @@ SNIPPET = textwrap.dedent(
     rendered: str = engine.render("# Title")
 
     plugin: Plugin | None = None
+
+    # Real plugins implement a strict subset of the hooks, which must satisfy
+    # `Plugin` -- this is what caught `Plugin` being a three-method protocol.
+    from oxydemark.contrib import (
+        AdmonitionPlugin,
+        LazyImagesPlugin,
+        MentionPlugin,
+        ShortcodePlugin,
+    )
+
+    only_postprocess: Plugin = LazyImagesPlugin()
+    only_transform: Plugin = MentionPlugin()
+    configured: OxydeEngine = OxydeEngine(
+        [AdmonitionPlugin(), ShortcodePlugin(), MentionPlugin(), LazyImagesPlugin()]
+    )
+    _ = configured.render("# Title")
+
     _ = oxydemark.__all__
     """
 ).strip()

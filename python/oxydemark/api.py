@@ -2,56 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, TypeAlias
 
 if TYPE_CHECKING:
     from oxydemark._core import AstNode
 
 
-class Plugin(Protocol):
-    """Protocol that all OxydeMark plugins must satisfy.
-
-    Plugins may implement any combination of the three hooks:
-
-    - `preprocess`: transform raw Markdown text before parsing.
-    - `transform`: modify the AST between parsing and rendering.
-    - `postprocess`: transform rendered HTML after rendering.
-
-    All hooks are optional; implement only the ones you need.
-
-    The protocol is **structural** and hooks are dispatched by `hasattr`, never
-    by `isinstance`. A plugin therefore does not need to inherit from or
-    register with anything -- any object exposing at least one correctly named
-    hook is a valid plugin.
-
-    See [`oxydemark.contrib`][] for worked examples and the
-    [plugin authoring guide](../plugins.md) for the full picture.
-
-    ## Hook ordering
-
-    [`OxydeEngine`][oxydemark.OxydeEngine] runs *one phase at a time* across
-    the whole plugin list, not one plugin at a time. For plugins `[A, B]` the
-    call order is `A.preprocess`, `B.preprocess`, parse, `A.transform`,
-    `B.transform`, render, `A.postprocess`, `B.postprocess`.
-
-    ## Choosing the right hook
-
-    | Hook | Operates on | Use it when |
-    | --- | --- | --- |
-    | `preprocess` | raw Markdown `str` | the construct is not representable in the AST yet (custom markers, macros, includes, front-matter tweaks). |
-    | `transform` | [`AstNode`][oxydemark.AstNode] tree | you need structure: adding, removing, re-typing or annotating nodes. |
-    | `postprocess` | rendered HTML `str` | the change is purely presentational and applies to the final markup. |
-
-    ## Escaping rules worth knowing
-
-    - [`AstNode.text`][oxydemark.AstNode] is **HTML-escaped** by the renderer.
-    - Raw HTML present in the *source* Markdown is **stripped**: the parser
-      replaces it with a `<!-- raw HTML omitted -->` placeholder, which is what
-      the resulting `"raw_html"` / `"html_block"` nodes carry as their `text`.
-    - A node of kind `"raw_html"` *created by a plugin* emits its `text`
-      **verbatim**; it is the only supported way to inject markup from a
-      `transform` hook.
-    """
+class Preprocessor(Protocol):
+    """Plugin protocol for the text-level `preprocess` hook."""
 
     def preprocess(self, markdown: str) -> str:
         """Transform raw Markdown *before* it reaches the Rust parser.
@@ -62,7 +20,11 @@ class Plugin(Protocol):
         Returns:
             The rewritten Markdown source.
         """
-        return markdown
+        ...
+
+
+class Transformer(Protocol):
+    """Plugin protocol for the AST-level `transform` hook."""
 
     def transform(self, ast: AstNode) -> AstNode:
         """Transform the AST *between* parsing and rendering.
@@ -105,7 +67,11 @@ class Plugin(Protocol):
         Returns:
             The (possibly modified) tree.
         """
-        return ast
+        ...
+
+
+class Postprocessor(Protocol):
+    """Plugin protocol for the HTML-level `postprocess` hook."""
 
     def postprocess(self, html: str) -> str:
         """Transform rendered HTML *after* it leaves the Rust renderer.
@@ -116,7 +82,59 @@ class Plugin(Protocol):
         Returns:
             The rewritten HTML.
         """
-        return html
+        ...
+
+
+Plugin: TypeAlias = Preprocessor | Transformer | Postprocessor
+"""Any object satisfying at least one of the three plugin hooks.
+
+Plugins may implement any combination of the hooks:
+
+- `preprocess` ([`Preprocessor`][oxydemark.api.Preprocessor]): transform raw
+  Markdown text before parsing.
+- `transform` ([`Transformer`][oxydemark.api.Transformer]): modify the AST
+  between parsing and rendering.
+- `postprocess` ([`Postprocessor`][oxydemark.api.Postprocessor]): transform
+  rendered HTML after rendering.
+
+All hooks are optional; implement only the ones you need. `Plugin` is therefore
+a *union* of the three single-hook protocols rather than a protocol requiring
+all three -- most real plugins, including every one in
+[`oxydemark.contrib`][], implement exactly one.
+
+The protocols are **structural** and hooks are dispatched by `hasattr`, never
+by `isinstance`. A plugin does not need to inherit from or register with
+anything -- any object exposing at least one correctly named hook is a valid
+plugin.
+
+See [`oxydemark.contrib`][] for worked examples and the
+[plugin authoring guide](../plugins.md) for the full picture.
+
+## Hook ordering
+
+[`OxydeEngine`][oxydemark.OxydeEngine] runs *one phase at a time* across the
+whole plugin list, not one plugin at a time. For plugins `[A, B]` the call
+order is `A.preprocess`, `B.preprocess`, parse, `A.transform`, `B.transform`,
+render, `A.postprocess`, `B.postprocess`.
+
+## Choosing the right hook
+
+| Hook | Operates on | Use it when |
+| --- | --- | --- |
+| `preprocess` | raw Markdown `str` | the construct is not representable in the AST yet (custom markers, macros, includes, front-matter tweaks). |
+| `transform` | [`AstNode`][oxydemark.AstNode] tree | you need structure: adding, removing, re-typing or annotating nodes. |
+| `postprocess` | rendered HTML `str` | the change is purely presentational and applies to the final markup. |
+
+## Escaping rules worth knowing
+
+- [`AstNode.text`][oxydemark.AstNode] is **HTML-escaped** by the renderer.
+- Raw HTML present in the *source* Markdown is **stripped**: the parser
+  replaces it with a `<!-- raw HTML omitted -->` placeholder, which is what
+  the resulting `"raw_html"` / `"html_block"` nodes carry as their `text`.
+- A node of kind `"raw_html"` *created by a plugin* emits its `text`
+  **verbatim**; it is the only supported way to inject markup from a
+  `transform` hook.
+"""
 
 
 class OxydeEngine:
