@@ -58,7 +58,7 @@ jobs:
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
 
@@ -99,7 +99,7 @@ jobs:
     # Must match the environment bound to the crates.io Trusted Publisher.
     environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # gh-ship has already created the tag, so check out exactly what is
           # being released rather than a branch tip.
@@ -171,13 +171,13 @@ jobs:
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
 
       # abi3 floor: building with the oldest supported interpreter is what makes
       # the resulting wheel usable on 3.12+.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -196,7 +196,7 @@ jobs:
         shell: bash
         run: python3 .github/scripts/check_wheel.py dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.target }}
           path: dist
@@ -210,11 +210,11 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -234,7 +234,7 @@ jobs:
           /tmp/sdist-smoke/bin/python -c \
             "import oxydemark; print(oxydemark.markdown_to_html('hello'))"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: dist
@@ -250,13 +250,13 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           merge-multiple: true
           path: dist
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: sdist
           path: dist
@@ -290,13 +290,13 @@ jobs:
       name: release
       url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           merge-multiple: true
           path: dist
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: sdist
           path: dist

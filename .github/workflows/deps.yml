@@ -23,7 +23,7 @@ jobs:
     name: Build against the latest dependencies
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # `cargo update --breaking` is still unstable, hence nightly.
       - uses: dtolnay/rust-toolchain@nightly

@@ -51,7 +51,7 @@ jobs:
       deployment: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history *and* tags: git-cliff derives the next version from
           # the last tag, and a shallow clone has neither.
@@ -69,7 +69,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: astral-sh/setup-uv@v6
+      # setup-uv stopped publishing major/minor tags at v8, so the full
+      # version is the only pin available upstream.
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "3.12"
 
@@ -200,7 +202,7 @@ jobs:
           gh extension install noirbizarre/gh-ship
           gh ship validate ship.release.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ship-release
           path: ship.release.json

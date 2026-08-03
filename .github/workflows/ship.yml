@@ -53,7 +53,7 @@ jobs:
       deployment: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # `gh ship prepare` reads .github/ship.yml and discovers workflows
           # from .github/workflows. Without them it cannot resolve
@@ -96,7 +96,7 @@ jobs:
       deployment: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install gh-ship
         env:
