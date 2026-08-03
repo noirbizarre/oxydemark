@@ -79,6 +79,7 @@ functions) is **private** and may change without notice.
 | `markdown_to_html(markdown: &str) -> Result<String, OxydeError>` | function | Convert Markdown to HTML in one pass (fast path). |
 | `AstNode` | struct | Tree-based AST node (`kind`, `children`, `text`, `attributes`, `metadata`) with `new()` and `walk()`. |
 | `OxydeError` | enum | First-class, PyO3-independent error type for the Rust surface. |
+| `Meta` | enum | Typed metadata value, re-exported from `rushdown`; the value type of `ParseResult::frontmatter` and `AstNode::props`. |
 
 The metadata-aware surface (`parse_document`, `ParseResult`, `slugify`,
 `extract_summary`) is defined additively in
@@ -102,6 +103,14 @@ Notes and constraints on the Rust surface:
   first-class [`OxydeError`]; `parse` is infallible. This supersedes the
   earlier decision to leak `PyResult` on the Rust surface, which was tracked as
   a 1.0 follow-up and has now been pulled forward.
+* `Meta` is the one item in the surface that originates outside the crate: it
+  is defined in `rushdown` and re-exported so the surface is self-contained --
+  a downstream crate can name it in a struct field, a function signature and a
+  `match` without depending on `rushdown` itself (issue #34). The corollary,
+  already stated in `Cargo.toml`, is that a `rushdown` major bump is a breaking
+  change for OxydeMark too; the `rushdown*` requirements are pinned exactly for
+  that reason (issue #33). Replacing it with an owned, `Serialize`-able
+  OxydeMark metadata type would be a breaking change and deserves its own OMEP.
 
 ### Feature gating
 

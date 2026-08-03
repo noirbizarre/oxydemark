@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use oxydemark::{
-    AstNode, Heading, OxydeError, ParseResult, extract_summary, markdown_to_html, parse,
+    AstNode, Heading, Meta, OxydeError, ParseResult, extract_summary, markdown_to_html, parse,
     parse_document, render_ast, slugify,
 };
 
@@ -52,15 +52,47 @@ fn markdown_to_html_error_is_oxyde_error() {
 fn parse_document_exposes_typed_frontmatter() {
     let result: ParseResult = parse_document("---\ntitle: Hi\ncount: 5\n---\nBody");
     assert_eq!(result.root.kind, "document");
-    // On the Rust surface, `frontmatter` is `Option<rushdown::ast::Meta>`.
+    // On the Rust surface, `frontmatter` is `Option<Meta>`, re-exported from
+    // the crate root (issue #34).
     let fm = result.frontmatter.expect("frontmatter present");
     match fm {
-        rushdown::ast::Meta::Mapping(map) => {
+        Meta::Mapping(map) => {
             assert!(map.get("title").is_some());
             assert!(map.get("count").is_some());
         }
         other => panic!("expected mapping frontmatter, got {other:?}"),
     }
+}
+
+#[test]
+fn meta_is_nameable_by_downstream_consumers() {
+    // Regression guard for issue #34: a downstream crate depending only on
+    // `oxydemark` must be able to *name* `Meta` -- in a struct field, in a
+    // function signature, and in a `match` -- without depending on `rushdown`.
+    struct Page {
+        metadata: Option<Meta>,
+    }
+
+    fn kind(meta: &Meta) -> &'static str {
+        match meta {
+            Meta::Mapping(_) => "mapping",
+            Meta::Sequence(_) => "sequence",
+            Meta::String(_) => "string",
+            _ => "scalar",
+        }
+    }
+
+    let page = Page {
+        metadata: parse_document("---\ntitle: Hi\ntags:\n  - a\n---\nBody").frontmatter,
+    };
+    let meta = page.metadata.as_ref().expect("frontmatter present");
+    assert_eq!(kind(meta), "mapping");
+
+    let Meta::Mapping(map) = meta else {
+        panic!("expected mapping frontmatter, got {meta:?}");
+    };
+    assert_eq!(kind(map.get("title").expect("title")), "string");
+    assert_eq!(kind(map.get("tags").expect("tags")), "sequence");
 }
 
 #[test]

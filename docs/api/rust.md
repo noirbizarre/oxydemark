@@ -31,6 +31,7 @@ Everything re-exported from the crate root is public and frozen under
 | `Heading` | struct | A heading entry or TOC tree node. |
 | `ParseResult` | struct | AST plus headings, TOC, summary and frontmatter. |
 | `OxydeError` | enum | The crate's error type. |
+| `Meta` | enum | Typed metadata value (re-exported from `rushdown`), used by `ParseResult::frontmatter` and `AstNode::props`. |
 
 ## Usage
 
