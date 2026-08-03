@@ -77,12 +77,12 @@ functions) is **private** and may change without notice.
 | `parse(markdown: &str) -> AstNode` | function | Parse Markdown into an `AstNode` tree (infallible). |
 | `render_ast(node: &AstNode) -> String` | function | Render an `AstNode` tree to HTML. |
 | `markdown_to_html(markdown: &str) -> Result<String, OxydeError>` | function | Convert Markdown to HTML in one pass (fast path). |
-| `AstNode` | struct | Tree-based AST node (`kind`, `children`, `text`, `attributes`, `metadata`) with `new()` and `walk()`. |
+| `AstNode` | struct | Tree-based AST node (`kind`, `children`, `text`, `attributes`, `metadata`, `props`) with `new()` and `walk()`. |
 | `OxydeError` | enum | First-class, PyO3-independent error type for the Rust surface. |
 | `Meta` | enum | Typed metadata value, re-exported from `rushdown`; the value type of `ParseResult::frontmatter` and `AstNode::props`. |
 
-The metadata-aware surface (`parse_document`, `ParseResult`, `slugify`,
-`extract_summary`) is defined additively in
+The metadata-aware surface (`parse_document`, `ParseResult`, `Heading`,
+`slugify`, `extract_summary`) is defined additively in
 [OMEP-0010](OMEP-0010-metadata-extraction.md).
 
 Notes and constraints on the Rust surface:
@@ -139,9 +139,13 @@ package top level and listed in its `__all__`:
 | `parse(markdown: str) -> AstNode` | `oxydemark._core` | Parse Markdown into an `AstNode` tree. |
 | `render_ast(ast: AstNode) -> str` | `oxydemark._core` | Render an `AstNode` tree to HTML. |
 | `markdown_to_html(markdown: str) -> str` | `oxydemark._core` | Convert Markdown to HTML in one pass. |
-| `AstNode` | `oxydemark._core` | AST node class: constructor `AstNode(kind, children=None, text=None, attributes=None, metadata=None)`, attributes `kind`/`children`/`text`/`attributes`/`metadata`, method `walk()`. |
+| `AstNode` | `oxydemark._core` | AST node class: constructor `AstNode(kind, children=None, text=None, attributes=None, metadata=None)`, attributes `kind`/`children`/`text`/`attributes`/`metadata` and the read-only `props`, method `walk()`. |
 | `OxydeEngine` | `oxydemark.api` | Pipeline engine: `OxydeEngine(plugins=None)`, `render(markdown: str) -> str`. |
-| `Plugin` | `oxydemark.api` | `Protocol` describing optional `preprocess`/`transform`/`postprocess` hooks. |
+| `Plugin` | `oxydemark.api` | Union of the `Preprocessor`/`Transformer`/`Postprocessor` protocols, i.e. any object implementing at least one hook. |
+
+As on the Rust side, the metadata-aware surface (`parse_document`,
+`ParseResult`, `Heading`, `slugify`, `extract_summary`) is defined additively in
+[OMEP-0010](OMEP-0010-metadata-extraction.md).
 
 Notes and constraints on the Python surface:
 
@@ -184,9 +188,10 @@ It sits in a distinct, weaker stability tier:
   the source of truth for `OxydeEngine` and `Plugin`.
 * The compiled `_core` module cannot be introspected from source by static type
   checkers, so ship a hand-written **`python/oxydemark/_core.pyi`** stub
-  declaring `AstNode`, `parse`, `render_ast`, and `markdown_to_html`. This is
-  the single stub file we maintain; the rest of the package relies on inline
-  hints.
+  declaring every name the extension exports -- `AstNode`, `Heading`,
+  `ParseResult`, `parse`, `parse_document`, `render_ast`, `markdown_to_html`,
+  `slugify` and `extract_summary`. This is the single stub file we maintain;
+  the rest of the package relies on inline hints.
 * Both `py.typed` and `_core.pyi` are packaged by maturin (they live under
   `python-source`).
 
@@ -217,7 +222,9 @@ Criteria for cutting **1.0** (all must hold):
    the Rust surface uses [`OxydeError`] and PyO3 is optional behind a feature.
 3. `AstNode.kind` values and node structure are documented and covered by tests
    asserting the contract.
-4. `py.typed` + `_core.pyi` pass a type-check gate in CI (e.g. mypy/pyright).
+4. ~~`py.typed` + `_core.pyi` pass a type-check gate in CI.~~ **Done**:
+   `mise run typecheck` runs [`ty`](https://github.com/astral-sh/ty) over the
+   package and is a dependency of `mise run ci` and of the CI `python` job.
 5. Downstream OxydePress integration has validated the surface in real use.
 
 Once 1.0 is reached, standard SemVer applies: breaking changes bump MAJOR.
@@ -245,8 +252,9 @@ Once 1.0 is reached, standard SemVer applies: breaking changes bump MAJOR.
   importable from the top-level package.
 * `ls docs/specs/OMEP-0008-public-api.md` confirms the OMEP exists.
 * CI continues to run the Rust and Python suites (`mise run ci`).
-* The typing gate (mypy/pyright over the package with its stub) is a 1.0 exit
-  criterion tracked separately.
+* The typing gate runs `ty` over the package with its stub (`mise run
+  typecheck`), and `tests/test_typing.py` additionally type-checks a snippet
+  exercising the frozen surface.
 
 ## Pros and Cons of the Options
 
@@ -287,4 +295,4 @@ Once 1.0 is reached, standard SemVer applies: breaking changes bump MAJOR.
     (issue #20).
   * ~~Introduce a first-class Rust error type before 1.0.~~ Done (`OxydeError`,
     issue #20).
-  * Add a type-check gate to CI.
+  * ~~Add a type-check gate to CI.~~ Done (`ty`, `mise run typecheck`).

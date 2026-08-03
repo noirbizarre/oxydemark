@@ -115,17 +115,25 @@ Commits out of the box.
 
 **Commit type mapping:**
 
+Groups are rendered in the order below, which is why each carries an
+`<!-- N -->` ordering marker in `cliff.toml`.
+
 | Commit prefix | Changelog group |
 | ------------- | --------------- |
-| `feat`        | Features        |
-| `fix`         | Bug Fixes       |
-| `doc`         | Documentation   |
-| `perf`        | Performance     |
-| `refactor`    | Refactoring     |
-| `style`       | Styling         |
-| `test`        | Testing         |
-| `build`       | Build           |
-| `ci`          | CI              |
-| `chore`       | Miscellaneous   |
+| `feat`        | 💫 Features      |
+| `fix`         | 🐛 Bug Fixes     |
+| `perf`        | ⚡ Performance   |
+| `refactor`    | 🔨 Refactor      |
+| `doc`         | 📚 Documentation |
+| `test`        | 🧪 Tests         |
+| `style`       | 🎨 Style         |
+| `build`       | 🏗️ Build         |
+| `ci`          | 🔧 CI            |
+| `chore`       | 🧹 Chores        |
+| `revert`      | ⏪ Reverts       |
+
+`chore(release):` and `chore(deps)` are skipped entirely: the former is the
+release commit itself, the latter is dependency noise. Both rules are matched
+before the general `^chore` rule.
 
 See: [git-cliff documentation](https://git-cliff.org/).

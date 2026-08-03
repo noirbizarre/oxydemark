@@ -132,7 +132,10 @@ commit_parsers = [
 ]
 
 [bump]
-# The repository carries no tags, so git-cliff returns this verbatim on the
+# Bootstrapping only: git-cliff returns this verbatim on a repository with no
+# tags, which stopped being the case with the 0.2.0 tag. Kept so a fresh clone
+# with no tags fetched still bumps predictably.
+# The repository carried no tags, so git-cliff returned this verbatim on the
 # first run rather than deriving anything. It is 0.2.0 rather than 0.1.0
 # because `oxydemark` 0.1.0 is already published on crates.io (a name
 # reservation predating this pipeline) and crates.io refuses to overwrite a

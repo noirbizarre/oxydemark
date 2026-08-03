@@ -113,10 +113,14 @@ HTML-level postprocessing after rendering.
 **Project structure:**
 
 ```
-src/lib.rs              # Rust core (PyO3 module, rushdown integration)
+src/                    # Rust core
+├── lib.rs              # Crate root, public re-exports
+├── api.rs              # Public API, rushdown integration
+├── ast.rs              # AstNode and arena-to-tree conversion
+└── python.rs           # PyO3 module (`python` feature)
 python/oxydemark/       # Python package
 ├── __init__.py         # Re-exports from _core
-└── api.py              # OxydeEngine, Plugin protocol
+└── api.py              # OxydeEngine, plugin protocols
 Cargo.toml              # Rust crate config (cdylib + rlib)
 pyproject.toml          # maturin build backend
 ```
@@ -135,3 +139,10 @@ See also: [PyO3 User Guide](https://pyo3.rs/),
 [maturin docs](https://www.maturin.rs/),
 [OMEP-0006](OMEP-0006-markdown-parser.md) (parser choice),
 [OMEP-0007](OMEP-0007-comark-syntax.md) (extended syntax).
+
+!!! note "Layout since OMEP-0008"
+
+    The original sketch put the whole Rust core in `src/lib.rs`. Feature-gating
+    the bindings (OMEP-0008) split it: `lib.rs` is now only the crate root and
+    its public re-exports, and the PyO3 layer lives in `src/python.rs` behind
+    the optional `python` feature. The tree above reflects the current layout.

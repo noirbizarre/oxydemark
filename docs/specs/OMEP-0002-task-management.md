@@ -88,23 +88,15 @@ version managers (rustup overrides, pyenv, asdf).
 
 **Defined tasks:**
 
-| Task               | Command                          |
-| ------------------ | -------------------------------- |
-| `build`            | `cargo build`                    |
-| `test`             | `cargo nextest run`              |
-| `test:python`      | `uv run --group test pytest`     |
-| `test:all`         | depends on test, test:python     |
-| `lint`             | `cargo clippy -- -D warnings`    |
-| `fmt`              | `cargo fmt`                      |
-| `fmt:check`        | `cargo fmt -- --check`           |
-| `ci`               | depends on fmt:check, lint, test |
-| `changelog`        | `git cliff --output CHANGELOG.md`|
-| `changelog:preview`| `git cliff --unreleased`         |
-| `cover`            | Rust coverage, both feature configurations (OMEP-0012) |
-| `cover:python`     | `pytest --cov` (OMEP-0012)       |
-| `cover:all`        | depends on cover, cover:python   |
-| `bench`            | `uv run --group bench pytest benchmarks/ --benchmark-only` |
-| `setup`            | `prek install`                   |
+`mise.toml` is the single source of truth: run `mise tasks` for the current
+list, each with its description. Reproducing the table here proved to drift
+(this OMEP once documented `changelog` without the `--bump` flag the release
+process depends on), so it is deliberately not duplicated. The contributor-facing
+summary lives in [CONTRIBUTING.md](https://github.com/noirbizarre/oxydemark/blob/main/CONTRIBUTING.md#available-tasks).
+
+Tasks are grouped by prefix -- `test:*`, `fmt:*`, `cover:*`, `docs:*`,
+`changelog:*` -- with the bare name aggregating or covering the common case, and
+`ci` depending on every gate CI enforces.
 
 **Managed tools:**
 
@@ -117,5 +109,6 @@ version managers (rustup overrides, pyenv, asdf).
 | `git-cliff`       | Changelog generator        |
 | `cargo-nextest`   | Test runner                |
 | `cargo-llvm-cov`  | Code coverage              |
+| `typos-cli`       | Spell-checker, also invoked by `cliff.toml` |
 
 See: [mise documentation](https://mise.jdx.dev/).

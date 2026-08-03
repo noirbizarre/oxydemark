@@ -88,16 +88,21 @@ The pre-existing reST/NumPy-flavoured docstrings were converted accordingly.
 ### Confirmation
 
 `mise run docs` builds the Zensical site and the rustdoc output into `site/`,
-and CI builds the docs on every pull request. A pytest guard asserts that every
-name in `oxydemark.__all__` carries a non-empty docstring, so the reference
-cannot silently lose content.
+and the CI `docs` job builds both on every pull request. A pytest guard asserts
+that every name in `oxydemark.__all__` carries a non-empty docstring, so the
+reference cannot silently lose content.
+
+Publication is handled by a separate workflow, `.github/workflows/docs.yml`,
+which builds the same targets on push to `main` and deploys them to the
+`github-pages` environment at <https://noirbizarre.github.io/oxydemark/>.
 
 ## Pros and Cons of the Options
 
 ### Option A -- Zensical + mkdocstrings
 
 * Good, because Markdown-native, so existing content is reused as-is.
-* Good, because griffe reads `.pyi` stubs statically, no compiled module needed.* Good, because TOML configuration matches the rest of the tooling.
+* Good, because griffe reads `.pyi` stubs statically, no compiled module needed.
+* Good, because TOML configuration matches the rest of the tooling.
 * Good, because it is the successor to Material for MkDocs, with an active
   roadmap for API documentation.
 * Bad, because mkdocstrings support is preliminary and the tool is pre-1.0.

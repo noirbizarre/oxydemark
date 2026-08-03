@@ -94,8 +94,14 @@ has excellent community-maintained actions (`dtolnay/rust-toolchain`,
 | `check` | `cargo fmt --check` + `cargo clippy` | stable |
 | `test` | `cargo llvm-cov nextest`, both feature configurations | stable, nightly (matrix) |
 | `build` | `cargo build` | stable |
-| `python` | Build wheel with maturin, smoke test import | stable + Python 3.12 |
+| `package` | `cargo publish --dry-run`, mirrors `mise run publish:check` (OMEP-0009) | stable |
+| `python` | Build wheel with maturin, run pytest, type-check with `ty`, verify wheel contents | stable + Python 3.12/3.13/3.14 (matrix) |
+| `sdist` | Build the sdist, install it and smoke-test the import (OMEP-0009) | stable |
+| `docs` | Build the Zensical site and the rustdoc reference (OMEP-0011) | stable |
 | `changelog` | `git cliff --unreleased` validation | N/A |
+
+Deployment of the documentation site to GitHub Pages is a separate workflow,
+`.github/workflows/docs.yml`, which runs on push to `main`.
 
 **Coverage:** the `test` and `python` jobs also produce coverage and JUnit
 reports and upload them to Codecov, each behind its own flag and gated to a
@@ -105,11 +111,12 @@ single matrix leg. See OMEP-0012 for the rationale and the component layout.
 
 | Action | Purpose |
 | ------ | ------- |
-| `actions/checkout@v4` | Clone the repository |
+| `actions/checkout@v7` | Clone the repository |
 | `dtolnay/rust-toolchain` | Install Rust toolchain |
 | `Swatinem/rust-cache@v2` | Cache cargo registry and target dir |
 | `taiki-e/install-action` | Install cargo-nextest, cargo-llvm-cov, git-cliff |
-| `actions/setup-python@v5` | Install Python for wheel build |
+| `actions/setup-python@v7` | Install Python for the coverage leg |
+| `astral-sh/setup-uv` | Provision Python and the dependency groups for the `python`, `sdist` and `docs` jobs |
 | `codecov/codecov-action@v7` | Upload coverage and test results (OMEP-0012) |
 
 **Triggers:** `push` to `main`, `pull_request` targeting `main`.

@@ -14,6 +14,14 @@ decision-makers: [Axel H.]
     (A2), wheel matrix (W2) and library-only (C1) decisions are unchanged.
     Sections marked *(amended)* below carry the current behaviour.
 
+!!! note "Bootstrapped 2026-08-03"
+
+    This OMEP is written from the pre-release state: statements that OxydeMark
+    is unpublished and that the repository carries no tags described the
+    situation at decision time. The pipeline has since run: `0.2.0`, `0.2.1`
+    and `0.2.2` are tagged and published on both crates.io and PyPI, and the
+    PyPI pending publisher has converted to a normal one.
+
 ## Context and Problem Statement
 
 OxydeMark is unpublished. Both of its consumable surfaces (the Rust `rlib`
@@ -86,8 +94,8 @@ version) and the CI foundations in OMEP-0005.
 * **Option W1: Linux-only wheel + sdist** -- Ship one manylinux wheel plus an
   sdist; other platforms build from source.
 * **Option W2: Full platform/Python matrix** -- Build wheels for Linux
-  (x86_64, aarch64), macOS (x86_64, arm64), and Windows (x86_64) across
-  Python 3.12 and 3.13, plus an sdist.
+  (x86_64, aarch64), macOS (x86_64, arm64), and Windows (x86_64) across every
+  supported Python (3.12 and later), plus an sdist.
 
 ### CLI in v0.2.0
 

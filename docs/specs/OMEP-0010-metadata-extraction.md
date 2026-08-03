@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-07-12
 decision-makers: [Axel H.]
 ---
@@ -17,15 +17,15 @@ and typed access to YAML frontmatter (for page configuration).
 Today the parse result (`AstNode`, see OMEP-0008) exposes only the raw tree plus
 a flat `metadata: Option<HashMap<String, String>>` on the document node. That
 map is stringly-typed (every value is coerced to a string, see
-`src/ast.rs:277`), headings carry no `id`, and there is no notion of a TOC or an
+`arena_to_ast_node` in `src/ast.rs`), headings carry no `id`, and there is no notion of a TOC or an
 excerpt. As a result every consumer re-implements the same slugging, tree
 building, and summary logic, and they do so inconsistently.
 
 This metadata belongs in the OxydeMark core so that both the Rust (`rlib`) and
 Python (`oxydemark._core`) surfaces share a single, tested implementation. This
-OMEP specifies **the APIs and their AST / Python representations**. It does not
-implement them; implementation is tracked as a follow-up issue, consistent with
-how OMEP-0007 specified Phase 3 shapes ahead of the code.
+OMEP specifies **the APIs and their AST / Python representations**. It was
+written ahead of the code, consistent with how OMEP-0007 specified Phase 3
+shapes; the surface described here has since shipped.
 
 ## Decision Drivers
 
@@ -82,6 +82,7 @@ Added to the surfaces frozen in OMEP-0008 (all additive):
 | `ParseResult` | struct/class | Rust + Python | `root: AstNode`, `headings`, `toc`, `summary`, `frontmatter`. |
 | `Heading` | struct/class | Rust + Python | `level`, `id`, `text`, `children`. |
 | `slugify(text, existing=None) -> str` | function | Rust + Python | The anchor algorithm, exposed for reuse. |
+| `extract_summary(markdown) -> str \| None` | function | Rust + Python | The summary algorithm, exposed for reuse without a full `parse_document`. |
 
 `ParseResult` fields:
 
@@ -128,9 +129,9 @@ metadata-aware path. This mirrors the existing `parse()` vs
 
 ### Confirmation
 
-* Rust unit tests under `#[cfg(test)]` in `src/ast.rs` cover the slug algorithm
-  (including collisions and Unicode), TOC nesting, summary splitting, and typed
-  frontmatter round-tripping.
+* Rust unit tests under `#[cfg(test)]` cover the slug algorithm (including
+  collisions and Unicode) in `src/slug.rs`, and TOC nesting, summary splitting
+  and typed frontmatter round-tripping in `src/ast.rs` and `src/api.rs`.
 * Python tests under `tests/` assert `parse_document(...).toc`, `.headings`,
   `.summary`, and `.frontmatter` shapes, extending the `tests/test_core.py`
   patterns.
@@ -156,7 +157,7 @@ rendered text content. The algorithm (`slugify`) is:
    fall back to `section`.
 
 **ID collision handling.** IDs must be unique within a document. A per-document
-set of already-assigned slugs is threaded through metadata computation. When a
+collection of already-assigned slugs is threaded through metadata computation. When a
 freshly-computed slug is already taken, append `-N` where `N` is the smallest
 integer `>= 1` that yields an unused slug:
 
@@ -171,14 +172,16 @@ literally contains a `## Overview 1` heading still gets distinct IDs.
 
 An **author-provided id wins.** If the heading already carries an `id` (via the
 comark attribute syntax, e.g. `## Title {#custom}`, parsed by the
-`attributes: true` option in `build_parser`, `src/lib.rs:37`), that id is used
+`attributes: true` option in `build_parser`, `src/api.rs`), that id is used
 verbatim and only participates in collision *detection* (it reserves its slot;
 it is never itself renumbered). Generated slugs then avoid it.
 
-`slugify(text: str, existing: set[str] | None = None) -> str` is exposed so
+`slugify(text: str, existing: list[str] | None = None) -> str` is exposed so
 plugins and downstream code can produce anchors with identical semantics; when
 `existing` is provided it applies the same `-N` disambiguation and the caller is
-expected to add the returned slug to the set.
+expected to add the returned slug to its own collection. The parameter is a
+*sequence*, not a `set`: the Rust signature is `Option<&[String]>` and the
+binding accepts any Python sequence of strings.
 
 ### Table-of-contents tree
 
@@ -265,10 +268,10 @@ result.summary   # "<p>Intro paragraph shown in listings.</p>\n"
   value (`str`, `int`, `float`, `bool`, `list`, `dict`, `None`), preserving the
   YAML structure. It is `None` when the document has no frontmatter block.
 * This supersedes `AstNode.metadata`, which flattens every value to a string
-  (`src/ast.rs:284`). `metadata` remains on the document node for backward
+  (see `arena_to_ast_node` in `src/ast.rs`). `metadata` remains on the document node for backward
   compatibility but is documented as deprecated in favour of `frontmatter`.
 * Frontmatter is parsed once by `rushdown-meta` (already enabled in
-  `build_parser`, `src/lib.rs:32`); `frontmatter` reflects the same source
+  `build_parser`, `src/api.rs`); `frontmatter` reflects the same source
   without the string coercion.
 
 > **Implementation note.** A typed mapping needs a `Py<PyDict>`-backed field,
@@ -325,11 +328,14 @@ result.summary   # "<p>Intro paragraph shown in listings.</p>\n"
   `python-markdown`'s `toc` extension (lowercase, hyphenate, `-N`
   disambiguation).
 * Follow-up actions:
-  * Implement `slugify`, `parse_document`, `ParseResult`, and `Heading` in
-    `src/ast.rs` with PyO3 wiring in `src/lib.rs`.
-  * Implement the anchoring pass that writes heading `id`s onto `root`.
-  * Share the `rushdown-meta`/YAML -> native Python conversion with OMEP-0007
-    component `props`.
-  * Add Rust `#[cfg(test)]` and Python `tests/` coverage per Confirmation.
+  * ~~Implement `slugify`, `parse_document`, `ParseResult`, and `Heading`.~~ --
+    **Done**: `src/api.rs` and `src/ast.rs`, with the slug algorithm in
+    `src/slug.rs` and the PyO3 wiring in `src/python.rs`.
+  * ~~Implement the anchoring pass that writes heading `id`s onto `root`.~~ --
+    **Done**: `assign_heading_anchors` in `src/extensions.rs`.
+  * ~~Share the `rushdown-meta`/YAML -> native Python conversion with OMEP-0007
+    component `props`.~~ -- **Done**.
+  * ~~Add Rust `#[cfg(test)]` and Python `tests/` coverage per Confirmation.~~
+    -- **Done**.
   * Deprecate and later remove `AstNode.metadata` in favour of
     `ParseResult.frontmatter`.
