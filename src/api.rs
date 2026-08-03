@@ -1261,6 +1261,50 @@ mod tests {
     }
 
     #[test]
+    fn render_block_component_props_only_body() {
+        let input = "::card\n---\nvariant: elevated\ncount: 42\n---\n::\n";
+        assert_eq!(markdown_to_html(input).unwrap(), "<div>\n</div>\n");
+
+        let props = component_props(input).expect("expected props");
+        assert_eq!(props.get("variant"), Some(&Meta::String("elevated".into())));
+        assert_eq!(props.get("count"), Some(&Meta::Int(42)));
+
+        let ast = parse(input);
+        let bc = find_block_component(&ast);
+        assert!(
+            bc.children.is_empty(),
+            "a props-only body must not produce children, got: {:?}",
+            bc.children.iter().map(|c| &c.kind).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn render_block_component_fenced_props_only_body() {
+        let input = "::card\n```yaml [props]\nvariant: elevated\n```\n::\n";
+        assert_eq!(markdown_to_html(input).unwrap(), "<div>\n</div>\n");
+
+        let props = component_props(input).expect("expected props");
+        assert_eq!(props.get("variant"), Some(&Meta::String("elevated".into())));
+
+        let ast = parse(input);
+        let bc = find_block_component(&ast);
+        assert!(
+            bc.children.is_empty(),
+            "a props-only body must not produce children, got: {:?}",
+            bc.children.iter().map(|c| &c.kind).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn render_block_component_props_then_body() {
+        let input = "::card\n---\nx: 1\n---\nBody\n::\n";
+        assert_eq!(
+            markdown_to_html(input).unwrap(),
+            "<div>\n<p>Body</p>\n</div>\n"
+        );
+    }
+
+    #[test]
     fn render_block_component_fast_path() {
         let input = "::note\nContent\n::";
         let html = markdown_to_html(input).unwrap();

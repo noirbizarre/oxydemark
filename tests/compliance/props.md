@@ -272,3 +272,62 @@ H
   ]
 }
 ````
+
+## props-only-body
+
+A body made only of a props block closes cleanly: the closing `::` fence must
+not leak as literal text.
+
+````comark
+::card
+---
+variant: elevated
+count: 42
+---
+::
+````
+
+````html
+<div>
+</div>
+````
+
+````json ast
+{
+  "descend": "first:block_component",
+  "props": {
+    "variant": "elevated",
+    "count": 42
+  },
+  "exact_children": true,
+  "children": []
+}
+````
+
+## fenced-props-only-body
+
+Same for the `yaml [props]` fence style.
+
+````comark
+::card
+```yaml [props]
+variant: elevated
+```
+::
+````
+
+````html
+<div>
+</div>
+````
+
+````json ast
+{
+  "descend": "first:block_component",
+  "props": {
+    "variant": "elevated"
+  },
+  "exact_children": true,
+  "children": []
+}
+````

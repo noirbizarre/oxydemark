@@ -173,9 +173,3 @@ the child *set* is itself the contract (slot ordering, nesting depth).
 - The fixtures are deliberately excluded from the published crate tarball and
   the PyPI sdist (see the `include` allow-list in `Cargo.toml`); the Rust
   harness skips itself when the directory is absent.
-
-## Known gaps
-
-- A component body consisting of *only* a YAML props block leaks its closing
-  `::` fence as literal text, so all props fixtures declare props body content. The
-  case will be added together with the fix.

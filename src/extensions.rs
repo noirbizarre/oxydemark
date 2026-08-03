@@ -418,9 +418,10 @@ fn parse_props_yaml(body: &str) -> Option<ast::Meta> {
 ///
 /// The block must appear *immediately* after the opening line: a blank first
 /// line yields `None`. On a well-formed block the raw body (without the
-/// delimiters/fence) is returned and the reader is advanced past the closing
-/// delimiter. When no block is present or the block is unterminated, the reader
-/// position is restored and `None` is returned.
+/// delimiters/fence) is returned and the reader is left at the end of the
+/// closing delimiter line (the block driver advances the line itself). When no
+/// block is present or the block is unterminated, the reader position is
+/// restored and `None` is returned.
 fn consume_block_props(reader: &mut text::BasicReader) -> Option<String> {
     let saved = reader.position();
 
@@ -464,7 +465,12 @@ fn consume_block_props(reader: &mut text::BasicReader) -> Option<String> {
             ClosingMarker::Fence => trimmed == "```",
         };
         if is_close {
-            reader.advance_line();
+            // Consume the closing delimiter but stay on its line: the block
+            // driver advances the line itself, and it would otherwise offer the
+            // next line to child parsers before `cont()` ever sees it, so a
+            // closing `::` fence right after the props block would leak as a
+            // paragraph.
+            reader.advance_to_eol();
             return Some(body);
         }
 
