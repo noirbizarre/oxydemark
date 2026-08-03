@@ -105,7 +105,7 @@ fn parse_document_without_frontmatter_is_none() {
 fn slugify_public() {
     assert_eq!(slugify("Hello World", None), "hello-world");
     assert_eq!(
-        slugify("Overview", Some(vec!["overview".to_string()])),
+        slugify("Overview", Some(&["overview".to_string()])),
         "overview-1"
     );
 }

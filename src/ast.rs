@@ -35,6 +35,12 @@ use crate::extensions::{BlockComponent, InlineComponent, Slot, SpanAttributes};
 // the `#[pyclass]` attribute) so that the typed `props` field can be exposed as
 // a native Python `dict` via a computed getter, mirroring
 // [`ParseResult::frontmatter`].
+//
+// Those accessors use the `get_`/`set_` prefixed form, unlike the bare-named
+// getters on [`Heading`] and [`ParseResult`]: `AstNode` fields are read-write,
+// and PyO3 strips the prefixes, so the pairing is what keeps a getter and its
+// setter from colliding on one Rust method name. `Heading` and `ParseResult`
+// are read-only outputs and have no such constraint.
 #[cfg_attr(feature = "python", pyclass(from_py_object))]
 #[derive(Clone, Debug)]
 pub struct AstNode {
@@ -438,7 +444,8 @@ fn heading_at_mut<'a>(roots: &'a mut [Heading], path: &[usize]) -> &'a mut Headi
 /// result.frontmatter["count"]  # 5 (an int, not "5")
 /// result.root.kind             # "document"
 /// ```
-#[cfg_attr(feature = "python", pyclass)]
+#[cfg_attr(feature = "python", pyclass(skip_from_py_object))]
+#[derive(Clone, Debug)]
 pub struct ParseResult {
     /// The parsed AST tree (identical to what [`crate::parse`] returns).
     ///

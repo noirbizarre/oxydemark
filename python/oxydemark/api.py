@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, TypeAlias
 
+from oxydemark._core import parse as _parse
+from oxydemark._core import render_ast as _render_ast
+
 if TYPE_CHECKING:
     from oxydemark._core import AstNode
 
@@ -179,9 +182,6 @@ class OxydeEngine:
         Returns:
             The final HTML, after every plugin hook has run.
         """
-        from oxydemark._core import parse as _parse
-        from oxydemark._core import render_ast as _render_ast
-
         # 1. Preprocessing: text-level plugins.
         text = markdown
         for plugin in self.plugins:

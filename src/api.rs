@@ -194,10 +194,10 @@ pub fn markdown_to_html(markdown: &str) -> Result<String, OxydeError> {
 /// fallback for empty results. When `existing` is provided, the returned slug
 /// is disambiguated with a `-N` suffix so it does not collide with any entry;
 /// the caller is expected to add the returned slug to its own set.
-pub fn slugify(text: &str, existing: Option<Vec<String>>) -> String {
+pub fn slugify(text: &str, existing: Option<&[String]>) -> String {
     match existing {
         Some(items) => {
-            let mut set: std::collections::HashSet<String> = items.into_iter().collect();
+            let mut set: std::collections::HashSet<String> = items.iter().cloned().collect();
             slug::slugify_unique(text, &mut set)
         }
         None => slug::slugify_base(text),
@@ -1898,7 +1898,7 @@ mod tests {
     fn slugify_public_function() {
         assert_eq!(slugify("Hello World", None), "hello-world");
         assert_eq!(
-            slugify("Overview", Some(vec!["overview".to_string()])),
+            slugify("Overview", Some(&["overview".to_string()])),
             "overview-1"
         );
     }

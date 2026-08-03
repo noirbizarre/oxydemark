@@ -43,7 +43,7 @@ fn py_markdown_to_html(markdown: &str) -> PyResult<String> {
 #[pyfunction]
 #[pyo3(name = "slugify", signature = (text, existing=None))]
 fn py_slugify(text: &str, existing: Option<Vec<String>>) -> String {
-    api::slugify(text, existing)
+    api::slugify(text, existing.as_deref())
 }
 
 /// Extract the summary (excerpt) preceding a `<!-- more -->` delimiter.

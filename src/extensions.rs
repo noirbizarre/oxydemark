@@ -41,6 +41,7 @@ use crate::html_render::{html_escape, is_renderable_attribute};
 /// (name, attributes) are carried in the AST for Python plugins to consume.
 #[derive(Debug)]
 pub(crate) struct BlockComponent {
+    /// The component name, surfaced to Python as `attributes["name"]`.
     pub(crate) name: String,
     /// Typed block props parsed from a leading YAML block (OMEP-0007).
     ///
@@ -92,6 +93,7 @@ impl From<BlockComponent> for KindData {
 /// The label content is parsed as inline Markdown children.
 #[derive(Debug)]
 pub(crate) struct InlineComponent {
+    /// The component name, surfaced to Python as `attributes["name"]`.
     pub(crate) name: String,
 }
 
@@ -125,6 +127,7 @@ impl From<InlineComponent> for KindData {
 /// becomes the slot's children.
 #[derive(Debug)]
 pub(crate) struct Slot {
+    /// The slot name, surfaced to Python as `attributes["name"]`.
     pub(crate) name: String,
 }
 
