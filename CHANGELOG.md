@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3](https://github.com/noirbizarre/oxydemark/compare/0.2.2..0.2.3) - 2026-08-04
+
+### 🐛 Bug Fixes
+
+- **api** Look hooks up with `getattr` so union members stay typed - ([1ade1bd](https://github.com/noirbizarre/oxydemark/commit/1ade1bd5013ab538d17fd457d74204c06a3ab16c))
+- **api** Make `Plugin` a union of single-hook protocols - ([de1d4bd](https://github.com/noirbizarre/oxydemark/commit/de1d4bd3f0da084ebc649d6f921e33e5d7ceb6db))
+- **render** Keep both render paths byte-identical for core blocks - ([0518017](https://github.com/noirbizarre/oxydemark/commit/051801716314eccc39a7bef49888b9d913ba7470))
+
+### 🔨 Refactor
+
+- Align conventions across the Rust and Python surfaces - ([bcaa7b2](https://github.com/noirbizarre/oxydemark/commit/bcaa7b266d045c47fd09cf17351507a5d2575041))
+
+### 📚 Documentation
+
+- **specs** Reconcile the OMEPs with the shipped implementation - ([a6f2619](https://github.com/noirbizarre/oxydemark/commit/a6f2619adaf68d7aebb06f94f5a1d4ed4553a70a))
+- Refresh installation, layout and task documentation - ([c0811c0](https://github.com/noirbizarre/oxydemark/commit/c0811c0d78a202809fb1948c0ed17f1589998058))
+- Correct the API reference and the plugin authoring guide - ([4e4fae6](https://github.com/noirbizarre/oxydemark/commit/4e4fae6dea174c64b3921aab9f1d32c14356e60f))
+
+### 🔧 CI
+
+- Update actions to their latest majors - ([62369ff](https://github.com/noirbizarre/oxydemark/commit/62369ffe2badf49213c5a5bb6bed44ca0c1a6642))
+
 ## [0.2.2](https://github.com/noirbizarre/oxydemark/compare/0.2.1..0.2.2) - 2026-08-03
 
 ### 🐛 Bug Fixes
